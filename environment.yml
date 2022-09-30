@@ -1,0 +1,17 @@
+name: darp_env
+channels:
+  - defaults
+dependencies:
+  - python=3.8
+  - pytorch
+  - numpy
+  - matplotlib
+  - seaborn
+  - pip
+  - pip:
+    - icecream
+    - moviepy
+    - drawSvg
+    - sklearn
+    - clearml
+    - gym
