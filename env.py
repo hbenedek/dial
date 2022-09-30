@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Tuple, List
 import numpy as np
 import gym
 
@@ -54,16 +54,18 @@ class DarpEnv(gym.Env):
 
         self.start_depot = None
         self.end_depot = None
-        self.drivers = []
-        self.targets = []
+        self.vehicles = []
+        self.requests = []
 
     def populate_instance(self):
         if self.datadir:
-            self.parse_data()
+            vehicles, requests = self.parse_data()
         else:
-            self.generate_instance()
+            vehicles, requests = self.generate_instance()
+        self.vehicles = vehicles
+        self.requests = requests
         
-    def generate_instance(self, window=None):
+    def generate_instance(self, window=None) -> Tuple[List[Vehicle], List[Request]]:
         if self.seed:
             np.random.seed(self.seed)
 
@@ -83,23 +85,56 @@ class DarpEnv(gym.Env):
             end_window = [self.time_end] * self.nb_targets
 
         #init Driver and Target instances
+        vehicles = []
         for i in range(self.nb_drivers):
             driver = Vehicle(id=i,
                             position=self.start_depot,
                             capacity=self.capacity,
                             max_ride_time=self.max_route_duration)
-            self.drivers.append(driver)
+            vehicles.append(driver)
 
+        requests = []
         for i in range(self.nb_targets):
-            target = Request(id=i,
+            request = Request(id=i,
                             pickup_position=target_pickup_coodrs[i],
                             target_position=target_dropoff_coords[i],
                             #represents the earliest and latest time, which the service may begin
                             start_window=start_window[i],
                             end_window=end_window[i],
                             max_ride_time=self.max_ride_time)
-            self.drivers.append(target)
+            requests.append(request)
+        return vehicles, requests
         
+    def parse_data(self) -> Tuple[List[Vehicle], List[Request]]:
+        file_name = self.datadir
+        vehicles = []
+        requests = []
+        with open(file_name, 'r') as file :
+            number_line = sum(1 if line and line.strip() else 0 for line in file if line.rstrip()) - 3
+            file.close()
+
+        with open(file_name, 'r') as file :
+            nb_drivers, wrong_number_line, c, e, f = list(map(int, file.readline().split()))
+
+        # Depot
+        identity, X, Y, we, ty, st, en = list(map(float, file.readline().split()))
+        #for d in range(nb_drivers):
+        #    driver = (position=np.array([X, Y]), identity=d+1, max_capacity=e, speed=1, verbose=False)
+        #    drivers.append(driver)
+
+        #for l in range(number_line) :
+        #    if l < number_line//2 :
+        #        identity, X, Y, we, ty, st, en = list(map(float, file.readline().split()))
+        #        # print(identity, X, Y, we, ty, st, en)
+        #        t = Target(pickup=np.array([X, Y]), dropoff=None, start=np.array([st, en]), end=None, identity=int(identity), weight=1)
+        #        targets.append(t)
+        #    else :
+        #        identity, X, Y, we, ty, st, en = list(map(float, file.readline().split()))
+        #        re_t = targets[l - number_line//2]
+        #        re_t.dropoff = np.array([X, Y])
+        #        re_t.end_fork = np.array([st, en])
+
+        return vehicles, requests
 
     def representation(self):
         pass
@@ -113,22 +148,57 @@ class DarpEnv(gym.Env):
 
     def update_drivers_position(self):
         pass
-
+    
     
     def step(self, action):
-        return obs, reward, done, info
+        pass
 
     def print_info(self):
         pass
 
-    def parse_data(self):
-        pass
+        
 
 
 
 
 if __name__ == "__main__":
-    env = DarpEnv(size =4, nb_targets=5, nb_drivers=2, time_end=1400, max_step=100, dataset=None)
+    #env = DarpEnv(size =4, nb_targets=5, nb_drivers=2, time_end=1400, max_step=100, dataset=None)
+    file_name = './data/cordeau/a2-16.txt'
+    with open(file_name, 'r') as file :
+        number_line = sum(1 if line and line.strip() else 0 for line in file if line.rstrip()) - 3
+        file.close()
+
+    with open(file_name, 'r') as file :
+        nb_drivers, nb_targets, max_route_duration, capacity, max_ride_time = list(map(int, file.readline().split()))
+    
+        #Depot
+        _, depo_x, depo_y, _, _, _, _ = list(map(float, file.readline().split()))
+        
+        vehicles = []
+        #Init vehicles
+        for i in range(2):
+            vehicle = Vehicle(id=i,
+                        position=np.array([depo_x, depo_y]),
+                        capacity=capacity,
+                        max_ride_time=max_ride_time)
+            vehicles.append(vehicle)
+
+        #Init requests
+        requests = []
+        for l in range(number_line):
+            if l < number_line//2:
+                identity, X, Y, we, ty, st, en = list(map(float, file.readline().split()))
+                # print(identity, X, Y, we, ty, st, en)
+                request = Request(pickup=np.array([X, Y]), dropoff=None, start=np.array([st, en]), end=None, identity=int(identity), weight=1)
+                requests.append(request)
+            else :
+                identity, X, Y, we, ty, st, en = list(map(float, file.readline().split()))
+                re_t = targets[l - number_line//2]
+                re_t.dropoff = np.array([X, Y])
+                re_t.end_fork = np.array([st, en])
+        
+    
+    print(vehicles)
 
 
 
