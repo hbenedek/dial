@@ -124,7 +124,7 @@ class DarpEnv(gym.Env):
     def output_to_destination(self) -> Dict[int, np.ndarray]:
         """"
         the Transformer, given a state configuration, for the current player outputs a probability distribution of the next potential target nodes
-        this function converts the output index to destination coordinates 
+        this function converts the output index to destination coordinates
         """
         pickups = {i: r.pickup_position for i, r in enumerate(self.requests)}
         dropoffs = {i + self.nb_requests: r.pickup_position for i, r in enumerate(self.requests)}
@@ -132,6 +132,7 @@ class DarpEnv(gym.Env):
         return pickups.update(dropoffs).update(depots)
 
     def coodinates_to_requests(self) -> Dict[np.ndarray, Request]:
+        """converts the 2D coordinates to its corresponding request"""
         pickups = {r.pickup_position: r for r in self.requests}
         dropoffs = {r.dropoff_position: r for r in self.requests}
         return pickups.update(dropoffs)
@@ -262,6 +263,10 @@ class DarpEnv(gym.Env):
 
 
     def update_vehicle_position(self):
+        """
+        all vehicles are moved closer to their current destination
+        pickups and dropoffs are resolved
+        """
         for vehicle in self.vehicles:
             dist_to_destination = vehicle.get_distance_to_destination()
             if float_equality(self.last_time_gap, dist_to_destination, eps=0.001):
@@ -291,6 +296,11 @@ class DarpEnv(gym.Env):
             
     
     def step(self, action: int):
+        """
+        moves the environment to its new state
+        this involves possible new time step, vehicle position update,
+        resolving pickups, dropoffs, assigning new destinations to vehicles
+        """
         self.take_action(action)
         self.current_step += 1
 
@@ -301,15 +311,17 @@ class DarpEnv(gym.Env):
             
             #Charge all players that may need a new destination
             for vehicle in self.vehicles:
-                    if vehicle.status == 'waiting':
-                        self.waiting_vehicles.append(vehicle.identity)
+                if vehicle.status == 'waiting':
+                    self.waiting_vehicles.append(vehicle.identity)
 
         self.current_vehicle = self.waiting_vehicles.pop()
-        reward = #TODO: it should be the total distance, check B&C paper
+        reward = self.get_reward()
         observation = self.next_observation()
         done = env.is_done()
         return observation, reward, done
 
+    def get_reward(self):
+        pass
 
     def is_done(self) -> bool:
         done = False
@@ -327,9 +339,3 @@ if __name__ == "__main__":
     env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=100, dataset=FILE_NAME)
     print(env.vehicles)
     print(env.requests)
-    
-        
-    
- 
-
-
