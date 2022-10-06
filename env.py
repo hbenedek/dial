@@ -1,12 +1,17 @@
-from collections import deque
-from typing import Deque, Optional, Tuple, List, Dict
-from utils import float_equality, distance, init_logger
+from typing import Optional, Tuple, List, Dict
 import numpy as np
 import gym
-import logging
+from utils import float_equality, distance, init_logger
+
 
 class Request():
-    def __init__(self, id: int, pickup_position: np.ndarray, dropoff_position: Optional[np.ndarray], start_window: np.ndarray, end_window: Optional[np.ndarray], max_ride_time: int):
+    """Class for representing requests"""
+    def __init__(self, id: int, 
+                pickup_position: np.ndarray, 
+                dropoff_position: Optional[np.ndarray], 
+                start_window: np.ndarray,
+                 end_window: Optional[np.ndarray], 
+                 max_ride_time: int):
         self.id = id
         self.pickup_position = pickup_position
         self.dropoff_position = dropoff_position
@@ -36,8 +41,8 @@ class Request():
         self.state = state
 
 
-
 class Vehicle():
+    """Class for representing Vehicles"""
     def __init__(self, id: int, position: np.ndarray, capacity: int, max_route_duration: int):
         self.id = id
         self.position = position
@@ -63,21 +68,21 @@ class Vehicle():
         """"set new position and save travelled distances"""
         distance_travelled = distance(self.position, new_position)
         self.last_distance_travelled = distance_travelled
-        self.total_distance_travelled =+ distance_travelled
+        self.total_distance_travelled += distance_travelled
         self.position = new_position
         logger.debug("%s moved to position %s", self, self.position)
 
     def pickup_request(self, request: Request, current_time: float):
         """given a time stamp and a request the Vehicle tries to load the request into its trunk"""
         if len(self.trunk) < self.capacity:
-            if request.check_window(current_time, start=True):
+            if request.check_window(current_time, start=True) and request.state == "pickup":
                 self.trunk.append(request)
                 logger.debug("%s picked up by %s", request, self)
                 request.set_state("in_trunk")
 
     def dropoff_request(self, request, current_time):
         """given a time stamp and a request the Vehicle tries to unload the request from its trunk"""
-        if request.check_window(current_time, start=True):
+        if request.check_window(current_time, start=True) and request in self.trunk:
             self.trunk.remove(request)
             request.set_state("delivered")
             logger.debug("%s dropped off by %s", request, self)
@@ -89,7 +94,6 @@ class Vehicle():
 
 class DarpEnv(gym.Env):
     """Custom Environment that follows gym interface"""
-
     def __init__(self,
                 size: int,
                 nb_requests: int,
@@ -113,7 +117,7 @@ class DarpEnv(gym.Env):
         self.time_end = time_end
         self.seed = seed
         self.datadir = dataset
-        self.action_space = gym.spaces.Discrete(nb_requests * 2 + 2) #TODO: not sure if we need the gym space stuff
+        self.action_space = gym.spaces.Discrete(nb_requests * 2 + 1) #TODO: not sure if we need the gym space stuff
         self.observation_space = gym.spaces.Box(low=-self.size,
                                                 high=self.size,
                                                 shape=(self.size + 1, self.size + 1),
@@ -130,12 +134,10 @@ class DarpEnv(gym.Env):
         vehicles, requests = self.populate_instance()
         self.vehicles = vehicles
         self.requests = requests
-        self.waiting_vehicles = [vehicle.id for vehicle in self.vehicles]
-        self.current_vehicle = self.waiting_vehicles[0]
+        self.waiting_vehicles = []
+        self.current_vehicle = self.vehicles[0].id
         self.destination_dict = self.output_to_destination()
         self.coordinates_dict = self.coodinates_to_requests()
-
-        #make index to coordinate dict
 
     def output_to_destination(self) -> Dict[int, np.ndarray]:
         """"
@@ -143,8 +145,8 @@ class DarpEnv(gym.Env):
         this function converts the output index to destination coordinates
         """
         pickups = {i: r.pickup_position for i, r in enumerate(self.requests)}
-        dropoffs = {i + self.nb_requests: r.pickup_position for i, r in enumerate(self.requests)}
-        depots = {self.nb_requests * 2: self.start_depot, self.nb_requests * 2 + 1: self.end_depot}
+        dropoffs = {i + self.nb_requests: r.dropoff_position for i, r in enumerate(self.requests)}
+        depots = {self.nb_requests * 2: self.end_depot}
         return {**pickups, **dropoffs, **depots}
 
     def coodinates_to_requests(self) -> Dict[Tuple[float, float], Request]:
@@ -153,14 +155,12 @@ class DarpEnv(gym.Env):
         dropoffs = {tuple(r.dropoff_position): r for r in self.requests}
         return {**pickups, **dropoffs}
 
-
     def populate_instance(self) -> Tuple[List[Vehicle], List[Request]]:
         """"
         the function returns a list of vehicle and requests instances 
         depending either by random generating or loading a cordeau instance
         """
         return self.parse_data() if self.datadir else self.generate_instance()
-
 
     def generate_instance(self, window=None) -> Tuple[List[Vehicle], List[Request]]:
         """"generates random pickup, dropoff and other constraints, a list parsed of Vehicle and Request objects"""
@@ -202,7 +202,6 @@ class DarpEnv(gym.Env):
                             max_ride_time=self.max_ride_time)
             requests.append(request)
         return vehicles, requests
-        
 
     def parse_data(self) -> Tuple[List[Vehicle], List[Request]]:
         """given a cordeau2006 instance, the function returns a list parsed of Vehicle and Request objects"""
@@ -238,7 +237,7 @@ class DarpEnv(gym.Env):
                 if l < number_line // 2:
                     identity, pickup_x, pickup_y, _, _, start_tw, end_tw = list(map(float, file.readline().split()))
               
-                    request = Request(id=identity + 1,
+                    request = Request(id=identity,
                                 pickup_position=np.array([pickup_x, pickup_y]),
                                 dropoff_position=None,
                                 #represents the earliest and latest time, which the service may begin
@@ -256,33 +255,36 @@ class DarpEnv(gym.Env):
 
         return vehicles, requests
 
-
     def take_action(self, action: int):
         """ Action: destination point as an indice of the map vactor. (Ex: 1548 over 2500)"""
         current_vehicle = self.vehicles[self.current_vehicle]
         current_vehicle.destination =  self.destination_dict[action]
+        logger.debug("choosing action %s (destination=%s) for %s", action, current_vehicle.destination, current_vehicle)
         current_vehicle.set_state("busy")
-        logger.debug("choosing action %s for %s", action, current_vehicle)
 
-    def update_time_step(self):
+    def update_time_step(self, epsilon=0.01):
         "For each vehicle queries the next decision time and sets the current time attribute to the minimum of these values"
+        logger.debug("Updating time step...")
         events = [self.current_time, self.time_end]
         for vehicle in self.vehicles:
             event = vehicle.get_distance_to_destination() #TODO: somehow if vehicle not moving, time step is not update correctly
+            # if vehicle choose to not move we still increase the time by epsilon
+            if event == 0:
+                event = epsilon
             events.append(self.current_time + event)
 
         events = [event for event in events if event > self.current_time]
         new_time = min(events)
         self.last_time_gap = new_time - self.current_time
         self.current_time = new_time
-        logger.debug("updating time step to %s", self.current_time)
-
+        logger.debug("Time step updated to %s", self.current_time)
 
     def update_vehicle_position(self):
         """
         all vehicles are moved closer to their current destination
         pickups and dropoffs are resolved
         """
+        logger.debug("Updating vehicle positions...")
         for vehicle in self.vehicles:
             dist_to_destination = vehicle.get_distance_to_destination()
             if float_equality(self.last_time_gap, dist_to_destination, eps=0.001):
@@ -290,27 +292,27 @@ class DarpEnv(gym.Env):
                 vehicle.move(vehicle.destination)
 
                 #resolving pickup, dropoff or depot arrival
-                request = self.coordinates_dict[tuple(vehicle.destination)]
-                if np.array_equal(request.pickup_position, vehicle.position):
-                    vehicle.pickup_request(request, self.current_time)
-                    vehicle.set_state("waiting")
-                elif np.array_equal(request.dropoff_position, vehicle.position):
-                    vehicle.dropoff_request(request, self.current_time)
-                    vehicle.set_state("waiting")
+                request = self.coordinates_dict.get(tuple(vehicle.destination)) #if destination is end depot dict returns None
+                if request:
+                    if np.array_equal(request.pickup_position, vehicle.position):
+                        vehicle.pickup_request(request, self.current_time)
+                        vehicle.set_state("waiting")
+                    elif np.array_equal(request.dropoff_position, vehicle.position):
+                        vehicle.dropoff_request(request, self.current_time)
+                        vehicle.set_state("waiting")
                 elif np.array_equal(self.end_depot, vehicle.position):
                     vehicle.set_state("finished")
-                    logger.debug("%s arrived at end depot", vehicle)
+                    logger.debug("%s arrived at end depot", vehicle) 
 
             #move vehicle closer to its destination
             elif self.last_time_gap < vehicle.dist_to_destination:
                 unit_vector = (vehicle.destination - vehicle.position) / vehicle.dist_to_destination
                 new_position = vehicle.position + self.last_time_gap * unit_vector
                 vehicle.move(new_position)
-
-            else :
-                raise ValueError(f"Could not update the position of {vehicle}")
             
-            
+            else:
+                vehicle.set_state("waiting")
+            logger.debug("%s updated to state %s", vehicle, vehicle.state)
     
     def step(self, action: int):
         """
@@ -318,14 +320,13 @@ class DarpEnv(gym.Env):
         this involves possible new time step, vehicle position update,
         resolving pickups, dropoffs, assigning new destinations to vehicles
         """
+        logger.debug("***START ENV STEP %s***", self.current_step)
         self.take_action(action)
         self.current_step += 1
 
         if not self.waiting_vehicles:
-            logger.debug("updating time and vehicle positions...")
             self.update_time_step()
-            if self.last_time_gap > 0:
-                self.update_vehicle_position()
+            self.update_vehicle_position()
             
             logger.debug("querying waiting vehicles for new destination assignment")
             for vehicle in self.vehicles:
@@ -333,23 +334,33 @@ class DarpEnv(gym.Env):
                     self.waiting_vehicles.append(vehicle.id)
                     logger.debug("%s added to waiting_vehicles list", self.vehicles[vehicle.id])
 
-        self.current_vehicle = self.waiting_vehicles.pop()
         reward = self.get_reward() #TODO: calculate, what is the reward if we miss a time window, exceed total vehicle route?
-        self.cumulative_reward += reward
         #observation = self.next_observation() #TODO: get input for transformer
         observation = None
-        done = env.is_done()
+        #check if vehicles returned to end depot
+        done = self.is_done()
+        #if there are still available Vehicles choose new current vehicle
+        if not done:
+            self.current_vehicle = self.waiting_vehicles.pop()
+        # check if all Requests are delivered, if not change reward
+        if done and not self.is_all_delivered():
+            reward = -100
         return observation, reward, done
 
     def get_reward(self) -> float:
-        """returns the sum of incremental travelled distence of all vehicles"""
-        return sum([vehicle.last_distance_travelled for vehicle in self.vehicles])
+        """returns the sum of total travelled distence of all vehicles""" 
+        #TODO: maybe we need incremental rewards as well? depends on how we use the RL learning signal
+        return sum([vehicle.total_distance_travelled for vehicle in self.vehicles])
 
     def is_done(self) -> bool:
-        """checks if all Vehicles are returned to the end depot and all Requests are delivered"""
+        """checks if all Vehicles are returned to the end depot"""
         is_in_end_depot = [vehicle.state == "finished" for vehicle in self.vehicles]
+        return all(is_in_end_depot)
+
+    def is_all_delivered(self) -> bool:
+        """checks if all Reuests are delivered"""
         is_delivered = [request.state == "delivered" for request in self.requests]
-        return all(is_in_end_depot + is_delivered)
+        return all(is_delivered)
 
     def next_observation(self):
         """returns the input (word, vehicle and request info) for the Transformer model for the next env step"""
@@ -360,13 +371,13 @@ if __name__ == "__main__":
     env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME)
 
     logger = init_logger()
-  
-
+    
+    #simulate env with random action samples
     for t in range(5000):
         action = env.action_space.sample()
         obs, reward, done = env.step(action)
-        env.cumulative_reward =+ reward
+        #TODO: implement nearest neigbour strategy
+        all_delivered = env.is_all_delivered()
         if done:
-            print(f"Episode finished after {t + 1} time steps")
-            break
-
+            print(f"Episode finished after {t + 1} steps, with reward {reward}, all requests delivered: {all_delivered}")
+        break
