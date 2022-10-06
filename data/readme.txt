@@ -1,9 +1,9 @@
 The first line in each instance contains five numbers. In order, they have the following meaning:
 - Number of vehicles
 - Number of requests
-- Maximum route duration
+- Maximum route duration (total duration of Vehicle's route cannot exceed this value)
 - Vehicle capacity
-- Maximum ride time
+- Maximum ride time (of a request)
 
 After the first lines follows 2n+2 lines defining the nodes in the instance. Nodes 0 and 2n+1 correspond to the start
 and end depot, nodes 1,...,n corresponds to pickup nodes and nodes n+1, ..., 2n corresponds to delivery nodes. Nodes
