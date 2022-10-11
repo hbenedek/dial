@@ -1,5 +1,5 @@
-import numpy as np
 import logging
+import numpy as np
 
 def float_equality(f1: float, f2: float, eps: float=0.001) -> bool:
     return abs(f1 - f2) < eps
@@ -7,7 +7,7 @@ def float_equality(f1: float, f2: float, eps: float=0.001) -> bool:
 def distance(pos1: np.ndarray, pos2: np.ndarray) -> float:
     return np.linalg.norm(pos1 - pos2)
 
-def init_logger(log_path: str=".", file_name: str="log.log") -> logging.Logger:
+def init_logger(log_path: str=".", file_name: str="log") -> logging.Logger:
     log_formatter = logging.Formatter("%(asctime)s [%(levelname)-5.5s]  %(message)s")
     logger = logging.getLogger()
 
@@ -20,3 +20,4 @@ def init_logger(log_path: str=".", file_name: str="log.log") -> logging.Logger:
     logger.addHandler(console_handler)
     logger.setLevel(logging.DEBUG)
     return logger
+
