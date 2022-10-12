@@ -158,6 +158,7 @@ class DarpEnv(gym.Env):
         self.current_vehicle = self.vehicles[0].id
         self.destination_dict = self.output_to_destination()
         self.coordinates_dict = self.coodinates_to_requests()
+        self.already_assigned: List[int] = []
 
     def output_to_destination(self) -> Dict[int, np.ndarray]:
         """"
@@ -279,6 +280,7 @@ class DarpEnv(gym.Env):
         """ Action: destination point as an indice of the map vactor. (Ex: 1548 over 2500)"""
         current_vehicle = self.vehicles[self.current_vehicle]
         current_vehicle.destination =  self.destination_dict[action]
+        self.already_assigned.append(action)
         logger.debug("choosing action %s (destination=%s) for %s", action, current_vehicle.destination, current_vehicle)
         current_vehicle.set_state("busy")
 
@@ -347,9 +349,8 @@ class DarpEnv(gym.Env):
         self.current_step += 1
 
         #if there are still available Vehicles choose new current vehicle
-        if self.waiting_vehicles:
-            self.current_vehicle = self.waiting_vehicles.pop()
-        else:
+        self.current_vehicle = self.waiting_vehicles.pop() if self.waiting_vehicles else None
+        if not self.current_vehicle:
             self.update_time_step()
             self.update_vehicle_position()
 
@@ -358,6 +359,7 @@ class DarpEnv(gym.Env):
                 if vehicle.state == 'waiting':
                     self.waiting_vehicles.append(vehicle.id)
                     logger.debug("%s added to waiting_vehicles list", self.vehicles[vehicle.id])
+            self.current_vehicle = self.waiting_vehicles.pop() if self.waiting_vehicles else None
 
         reward = self.get_reward() #TODO:
         #observation = self.next_observation() #TODO: get input for transformer
@@ -412,13 +414,13 @@ class DarpEnv(gym.Env):
         """
         vehicle = env.vehicles[self.current_vehicle]
         choice_id, choice_dist = None, np.inf #(request id, distance to target)
-
         for request in self.requests:
             #potential pickup
             if vehicle.can_pickup(request, self.current_time):
-                dist = distance(vehicle.position, request.pickup_position)
-                if choice_dist > dist:
-                    choice_id, choice_dist = request.id, dist
+                if request.id not in self.already_assigned:
+                    dist = distance(vehicle.position, request.pickup_position)
+                    if choice_dist > dist:
+                        choice_id, choice_dist = request.id, dist
 
             #potential Dropoff
             elif vehicle.can_dropoff(request, self.current_time):
@@ -433,8 +435,10 @@ class DarpEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    FILE_NAME = './data/cordeau/a2-16.txt'
-    env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=100, dataset=FILE_NAME)
+    #FILE_NAME = './data/cordeau/a2-16.txt'
+    FILE_NAME = './data/test_sets/t1-2.txt'
+    #env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=100, dataset=FILE_NAME)
+    env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME)
 
     logger = init_logger()
 
@@ -444,7 +448,6 @@ if __name__ == "__main__":
         #action = env.action_space.sample()
         obs, reward, done = env.step(action)
         print([r.state for r in env.requests])
-        #TODO: implement nearest neigbour strategy
         all_delivered = env.is_all_delivered()
         if done:
             print(f"Episode finished after {t + 1} steps, with reward {reward}, all requests delivered: {all_delivered}")
