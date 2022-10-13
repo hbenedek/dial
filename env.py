@@ -19,6 +19,7 @@ class Request():
         self.end_window = end_window
         self.max_ride_time = max_ride_time
         self.state = "pickup"
+        self.pickup_time: Optional[float] = None
 
     def __repr__(self):
         return f"Request_{self.id}_status_{self.state}"
@@ -43,6 +44,21 @@ class Request():
         """state of the Request is either pickup, in_trunk or delivered"""
         logger.debug( "setting new state: %s -> %s", self, state)
         self.state = state
+
+    def get_service_time(self):
+        return distance(self.pickup_position, self.dropoff_position)
+
+    def tight_window(self):
+        """making the time windows as tight as possible"""
+        service_time = self.get_service_time()
+        #earliest i can deliver
+        self.end_window[0] = max(self.end_window[0], self.start_window[0] + service_time)
+        #latest i can deliver
+        self.end_window[1] = min(self.end_window[1], self.start_window[1] + self.max_ride_time)
+        #earliest i can pickup (in order to be able to reach end_window[0] within max ride time)
+        self.start_window[0] = max(self.start_window[0], self.end_window[0] - self.max_ride_time)
+        #latest i can pickup (in order to arrive until end_window[1])
+        self.start_window[1] = min(self.start_window[1], self.end_window[1] - service_time)
 
 
 class Vehicle():
@@ -86,6 +102,7 @@ class Vehicle():
             self.trunk.append(request)
             logger.debug("%s picked up by %s", request, self)
             request.set_state("in_trunk")
+            request.pickup_time = current_time
         else:
             logger.debug("ERROR: %s pickup DENIED for %s", request, self)
 
@@ -155,6 +172,9 @@ class DarpEnv(gym.Env):
         vehicles, requests = self.populate_instance()
         self.vehicles = vehicles
         self.requests = requests
+        logger.debug("tightening window constraints for all Requests")
+        for request in requests:
+            request.tight_window()
         self.waiting_vehicles = [vehicle.id for vehicle in self.vehicles]
         self.current_vehicle = self.waiting_vehicles.pop()
         logger.debug("new current vehicle selected: %s", self.current_vehicle)
@@ -292,7 +312,7 @@ class DarpEnv(gym.Env):
         logger.debug("Updating time step...")
         events = [self.current_time, self.time_end]
         for vehicle in self.vehicles:
-            if vehicle.state is not "finished":
+            if vehicle.state != "finished":
                 event = vehicle.get_distance_to_destination() 
                 # if vehicle choose to not move we still increase the time by epsilon
                 if event == 0:
@@ -313,7 +333,7 @@ class DarpEnv(gym.Env):
         logger.debug("Updating vehicle positions...")
         self.update_needed = False
         for vehicle in self.vehicles:
-            if vehicle.state is not "finished":
+            if vehicle.state != "finished":
                 dist_to_destination = vehicle.get_distance_to_destination()
                 if float_equality(self.last_time_gap, dist_to_destination, eps=0.001):
                     #vehicle arriving to destination
@@ -408,16 +428,13 @@ class DarpEnv(gym.Env):
         """checks if start, end time windows are satisfied"""
         start = [self.current_time <= r.start_window[1] for r in self.requests if r.state == "pickup"]
         end = [self.current_time <= r.end_window[1] for r in self.requests if r.state in ["pickup", "in_trunk"]]
-        #max_ride_time = [r for r in self.requests] #TODO: check max ride times somehow
+        max_ride_time = [self.current_time - r.pickup_time < r.max_ride_time for r in self.requests if r.state == "in_trunk"] 
         max_route_duration = [v.total_distance_travelled <= self.max_route_duration for v in self.vehicles]
-        return all(start + end + max_route_duration)
+        return all(start + end + max_route_duration + max_ride_time)
 
     def next_observation(self):
         """returns the input (word, vehicle and request info) for the Transformer model for the next env step"""
         pass
-
-    def tighten_window(self):
-        pass #TODO: check pawal code for window tightening dist = 5, start: [0, 10] deliver: [100, 110] -----> start: [95, 105], deliver: [100: 110]
 
     def nearest_action_choice(self):
         """
@@ -436,7 +453,6 @@ class DarpEnv(gym.Env):
 
             #potential Dropoff
             elif vehicle.can_dropoff(request, self.current_time):
-                logger.debug("%s TRYING TO DROP OFF %s", vehicle, request)
                 dist = distance(vehicle.position, request.dropoff_position)
                 if choice_dist > dist:
                     choice_id, choice_dist = request.id + self.nb_requests, dist
