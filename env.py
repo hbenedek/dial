@@ -1,7 +1,8 @@
+from logging import Logger
 from typing import Optional, Tuple, List, Dict
 import numpy as np
 import gym
-from utils import float_equality, distance, init_logger
+from utils import coord2int, float_equality, distance, init_logger
 
 
 class Request():
@@ -19,6 +20,7 @@ class Request():
         self.end_window = end_window
         self.max_ride_time = max_ride_time
         self.state = "pickup"
+        self.statedict = {"pickup": 0, "in_trunk": 1, "delivered": 2}
         self.pickup_time: Optional[float] = None
 
     def __repr__(self):
@@ -60,6 +62,21 @@ class Request():
         #latest i can pickup (in order to arrive until end_window[1])
         self.start_window[1] = min(self.start_window[1], self.end_window[1] - service_time)
 
+    def get_vector(self) -> List[int]:
+        """returns the vector representation of the Request"""
+        vector = [self.id]
+        vector.append(coord2int(self.pickup_position[0]))
+        vector.append(coord2int(self.pickup_position[1]))
+        vector.append(coord2int(self.dropoff_position[0]))
+        vector.append(coord2int(self.dropoff_position[1]))
+        vector.append(self.start_window[0])
+        vector.append(self.start_window[1])
+        vector.append(self.end_window[0])
+        vector.append(self.end_window[1])
+        vector.append(self.statedict[self.state])
+        vector.append(self.max_ride_time)
+        return vector
+
 
 class Vehicle():
     """Class for representing Vehicles"""
@@ -69,6 +86,7 @@ class Vehicle():
         self.capacity = capacity
         self.max_route_duration = max_route_duration
         self.state: str = "waiting"
+        self.statedict = {"waiting": 0, "busy": 1, "finished": 2}
         self.trunk: List[Request] = []
         self.dist_to_destination: float = 0
         self.last_distance_travelled = 0
@@ -124,6 +142,15 @@ class Vehicle():
         logger.debug( "setting new state: %s -> %s", self, state)
         self.state = state
 
+    def get_vector(self) -> List[int]:
+        """returns the vector representation of the Request"""
+        vector = [self.max_route_duration,
+                coord2int(self.position[0]),
+                coord2int(self.position[1]),
+                self.statedict[self.state]]
+        trunk =  [r.id for r in self.trunk]
+        trunk = trunk + [0] * (self.capacity - len(self.trunk))
+        return vector + trunk
 
 class DarpEnv(gym.Env):
     """Custom Environment that follows gym interface"""
@@ -133,13 +160,16 @@ class DarpEnv(gym.Env):
                 nb_vehicles: int,
                 time_end: int,
                 max_step: int,
+                logger: Logger,
                 max_route_duration: Optional[int]=None,
                 capacity: Optional[int]=None,
                 max_ride_time: Optional[int]=None,
                 seed: Optional[int]=None,
-                dataset: Optional[str]=None):
+                dataset: Optional[str]=None,
+                window: Optional[bool]=None):
         super(DarpEnv, self).__init__()
-        logger.debug("initializing env")
+        self.logger = logger
+        self.logger.debug("initializing env")
         self.size = size
         self.max_step = max_step
         self.nb_requests = nb_requests
@@ -159,6 +189,7 @@ class DarpEnv(gym.Env):
         self.current_step = 0 #counts how many times the self.step() was envoked
         self.current_time = 0
         self.last_time_gap = 0 #difference between consequtive time steps
+        self.window = window
 
         if max_route_duration:
             self.max_route_duration = max_route_duration
@@ -168,16 +199,16 @@ class DarpEnv(gym.Env):
         self.start_depot = np.empty(2)
         self.end_depot = np.empty(2)
 
-        logger.debug("populate env instance with %s Vehicle and %s Request objects", self.nb_vehicles, self.nb_requests)
+        self.logger.debug("populate env instance with %s Vehicle and %s Request objects", self.nb_vehicles, self.nb_requests)
         vehicles, requests = self.populate_instance()
         self.vehicles = vehicles
         self.requests = requests
-        logger.debug("tightening window constraints for all Requests")
+        self.logger.debug("tightening window constraints for all Requests")
         for request in requests:
             request.tight_window()
         self.waiting_vehicles = [vehicle.id for vehicle in self.vehicles]
         self.current_vehicle = self.waiting_vehicles.pop()
-        logger.debug("new current vehicle selected: %s", self.current_vehicle)
+        self.logger.debug("new current vehicle selected: %s", self.current_vehicle)
         self.destination_dict = self.output_to_destination()
         self.coordinates_dict = self.coodinates_to_requests()
         self.already_assigned: List[int] = []
@@ -204,7 +235,7 @@ class DarpEnv(gym.Env):
         the function returns a list of vehicle and requests instances
         depending either by random generating or loading a cordeau instance
         """
-        return self.parse_data() if self.datadir else self.generate_instance()
+        return self.parse_data() if self.datadir else self.generate_instance(self.window)
 
     def generate_instance(self, window=None) -> Tuple[List[Vehicle], List[Request]]:
         """"generates random pickup, dropoff and other constraints, a list parsed of Vehicle and Request objects"""
@@ -220,8 +251,7 @@ class DarpEnv(gym.Env):
 
         #generate time window constraints
         if window:
-            pass #TODO: generate somehow time window conditions
-            # (start + dist < end, 50% free start, 50% free end???)
+            start_window, end_window  = self.generate_window()
         else:
             start_window = np.array([0, self.time_end])
             end_window = np.array([0, self.time_end])
@@ -436,6 +466,28 @@ class DarpEnv(gym.Env):
         """returns the input (word, vehicle and request info) for the Transformer model for the next env step"""
         pass
 
+    def generate_window(self) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+        #FIXME: this method does not seem very sophisticated, copied from Pawal's code
+        """Generate 50% of free dropof conditions, and 50% of free pickup time conditions time windows for Requests"""
+        start_windows = []
+        end_windows = []
+        for j in range(self.nb_requests):
+            # Generate start and end point for window
+            start = np.random.randint(0, self.time_end * 0.9) 
+            end = np.random.randint(start + 15, start + 45)
+            #free pickup condition
+            if j < self.nb_requests // 2:
+                start_fork = [max(0, start - self.max_ride_time), end]
+                end_fork = [start, end]
+            #free dropoff condition
+            else:
+                start_fork = [start, end]
+                end_fork = [start, min(self.time_end, end + self.max_ride_time)]
+
+            start_windows.append(np.array(start_fork))
+            end_windows.append(np.array(end_fork))
+        return start_windows, end_windows
+
     def nearest_action_choice(self):
         """
         Given the current environment configuration, returns the closest possible destination for the current vehicle
@@ -468,7 +520,7 @@ if __name__ == "__main__":
     logger = init_logger()
     FILE_NAME = './data/test_sets/t1-2.txt'
     #env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=100, dataset=FILE_NAME)
-    env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME)
+    env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME, logger=logger)
 
 
     #simulate env with random action samples
