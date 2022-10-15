@@ -1,25 +1,14 @@
 import numpy as np
-from requests import request
+from collections import deque
+from torch import optim
 import torch.nn as nn
 import torch
 from utils import get_device
 from torch.distributions import Categorical
-
 import numpy as np
 from env import DarpEnv
 from utils import coord2int, init_logger
 import time
-
-
-def representation(env: DarpEnv) -> tuple(torch.Tensor, torch.Tensor, torch.Tensor):
-    world = np.array([env.current_time, env.current_vehicle, coord2int(env.start_depot[1]), coord2int(env.end_depot[1])])
-    requests = np.stack([r.get_vector() for r in env.requests])
-    vehicles = np.stack([v.get_vector() for v in env.vehicles])
-    w_tensor = torch.from_numpy(world).type(torch.FloatTensor).unsqueeze(dim=0)
-    r_tensor = torch.from_numpy(requests).type(torch.FloatTensor)
-    v_tensor = torch.from_numpy(vehicles).type(torch.FloatTensor)
-    return w_tensor, r_tensor, v_tensor
-
 
 class Policy(nn.Module):
     def __init__(self, d_model=512, nhead=8, nb_actions = 10, nb_tokens = 4):
@@ -41,29 +30,35 @@ class Policy(nn.Module):
         x = self.classifier(x)
         return self.softmax(x)
     
-    #def act(self, state):
-    #    state = torch.from_numpy(state).float().unsqueeze(0).to(device)
-    #    probs = self.forward(state).cpu()
-    #    m = Categorical(probs)
-    #    action = m.sample()
-    #    return action.item(), m.log_prob(action)
+    def act(self, state):
+        world, requests, vehicles, = state 
+        probs = self.forward(world, requests, vehicles).cpu()
+        m = Categorical(probs)
+        action = m.sample()
+        return action.item(), m.log_prob(action)
 
 
 #TODO: change this
-def reinforce(policy, optimizer, n_training_episodes, max_t, gamma, print_every):
+def reinforce(policy: Policy,
+             optimizer: torch.optim.Optimizer,
+             nb_episodes: int, 
+             max_time: int, 
+             gamma: float,
+             print_every: bool,
+             env: DarpEnv):
     # Help us to calculate the score during the training
     scores_deque = deque(maxlen=100)
     scores = []
     # Line 3 of pseudocode
-    for i_episode in range(1, n_training_episodes+1):
+    for i_episode in range(1, nb_episodes + 1):
         saved_log_probs = []
         rewards = []
         state = env.reset()
         # Line 4 of pseudocode
-        for t in range(max_t):
+        for t in range(max_time):
             action, log_prob = policy.act(state)
             saved_log_probs.append(log_prob)
-            state, reward, done, _ = env.step(action)
+            state, reward, done = env.step(action)
             rewards.append(reward)
             if done:
                 break 
@@ -94,12 +89,9 @@ def reinforce(policy, optimizer, n_training_episodes, max_t, gamma, print_every)
 
 if __name__ == "__main__":
     device = get_device()
-    logger = init_logger()
     FILE_NAME = './data/test_sets/t1-2.txt'    
-    env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME, logger=logger)
-    world, requests, vehicles = representation(env)
-
-    model = Policy(256, 8)
-    probs = model(world, requests, vehicles)
-    print(probs.size())
+    env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME)
+    policy = Policy(256, 8)
+    optimizer = torch.optim.Adam(policy.parameters(), lr=0.005)
+    reinforce(policy=policy, optimizer=optimizer, nb_episodes=1, max_time=1400, gamma=1, print_every=True, env=env)
 

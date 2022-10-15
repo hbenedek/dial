@@ -2,8 +2,10 @@ from logging import Logger
 from typing import Optional, Tuple, List, Dict
 import numpy as np
 import gym
+import torch
 from utils import coord2int, float_equality, distance, init_logger
 
+logger = init_logger()
 
 class Request():
     """Class for representing requests"""
@@ -160,7 +162,6 @@ class DarpEnv(gym.Env):
                 nb_vehicles: int,
                 time_end: int,
                 max_step: int,
-                logger: Logger,
                 max_route_duration: Optional[int]=None,
                 capacity: Optional[int]=None,
                 max_ride_time: Optional[int]=None,
@@ -168,8 +169,7 @@ class DarpEnv(gym.Env):
                 dataset: Optional[str]=None,
                 window: Optional[bool]=None):
         super(DarpEnv, self).__init__()
-        self.logger = logger
-        self.logger.debug("initializing env")
+        logger.debug("initializing env")
         self.size = size
         self.max_step = max_step
         self.nb_requests = nb_requests
@@ -186,34 +186,37 @@ class DarpEnv(gym.Env):
                                                 shape=(self.size + 1, self.size + 1),
                                                 dtype=np.int16)
         self.current_episode = 0
-        self.current_step = 0 #counts how many times the self.step() was envoked
-        self.current_time = 0
-        self.last_time_gap = 0 #difference between consequtive time steps
         self.window = window
 
         if max_route_duration:
             self.max_route_duration = max_route_duration
         else:
              self.max_route_duration = self.max_step
-        self.cumulative_reward = 0
         self.start_depot = np.empty(2)
         self.end_depot = np.empty(2)
 
-        self.logger.debug("populate env instance with %s Vehicle and %s Request objects", self.nb_vehicles, self.nb_requests)
+    def reset(self):
+        """restarts/initializes the environment"""
+        logger.debug("populate env instance with %s Vehicle and %s Request objects", self.nb_vehicles, self.nb_requests)
         vehicles, requests = self.populate_instance()
         self.vehicles = vehicles
         self.requests = requests
-        self.logger.debug("tightening window constraints for all Requests")
+        logger.debug("tightening window constraints for all Requests")
         for request in requests:
             request.tight_window()
         self.waiting_vehicles = [vehicle.id for vehicle in self.vehicles]
         self.current_vehicle = self.waiting_vehicles.pop()
-        self.logger.debug("new current vehicle selected: %s", self.current_vehicle)
+        logger.debug("new current vehicle selected: %s", self.current_vehicle)
         self.destination_dict = self.output_to_destination()
         self.coordinates_dict = self.coodinates_to_requests()
         self.already_assigned: List[int] = []
         self.update_needed = True
-
+        self.current_step = 0 #counts how many times the self.step() was envoked
+        self.current_time = 0
+        self.last_time_gap = 0 #difference between consequtive time steps
+        self.cumulative_reward = 0
+        return self.representation()
+        
     def output_to_destination(self) -> Dict[int, np.ndarray]:
         """"
         the Transformer, given a state configuration, for the current player outputs a probability distribution of the
@@ -403,8 +406,8 @@ class DarpEnv(gym.Env):
         self.current_step += 1
 
         #if there are still available Vehicles choose new current vehicle
-        next_player = self.waiting_vehicles.pop() if self.waiting_vehicles else None
-        if next_player is None:
+        next_player = self.waiting_vehicles.pop() if self.waiting_vehicles else self.nb_vehicles
+        if next_player == self.nb_vehicles:
             self.update_needed = True #if a Vehicle arrives at end depot we need to perform one more update
             while self.update_needed:
                 self.update_time_step()
@@ -415,7 +418,7 @@ class DarpEnv(gym.Env):
                 if vehicle.state == 'waiting':
                     self.waiting_vehicles.append(vehicle.id)
                     logger.debug("%s added to waiting_vehicles list", self.vehicles[vehicle.id])
-            next_player = self.waiting_vehicles.pop() if self.waiting_vehicles else None
+            next_player = self.waiting_vehicles.pop() if self.waiting_vehicles else self.nb_vehicles
         
         self.current_vehicle = next_player
         logger.debug("new current vehicle selected: %s", self.current_vehicle)
@@ -424,7 +427,7 @@ class DarpEnv(gym.Env):
         #observation = self.next_observation() #TODO: get input for transformer
 
         #TODO: this part if a bit confusing
-        observation = None
+        observation = self.representation()
         if self.are_time_windows_satisfied():
             #check if vehicles returned to end depot
             done = self.is_done()
@@ -515,13 +518,23 @@ class DarpEnv(gym.Env):
         return choice_id
 
 
+    def representation(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        world = np.array([self.current_time, self.current_vehicle, coord2int(self.start_depot[1]), coord2int(self.end_depot[1])])
+        requests = np.stack([r.get_vector() for r in self.requests])
+        vehicles = np.stack([v.get_vector() for v in self.vehicles])
+        w_tensor = torch.from_numpy(world).type(torch.FloatTensor).unsqueeze(dim=0)
+        r_tensor = torch.from_numpy(requests).type(torch.FloatTensor)
+        v_tensor = torch.from_numpy(vehicles).type(torch.FloatTensor)
+        return w_tensor, r_tensor, v_tensor
+
+
 if __name__ == "__main__":
     #FILE_NAME = './data/cordeau/a2-16.txt'
-    logger = init_logger()
+    #logger = init_logger()
     FILE_NAME = './data/test_sets/t1-2.txt'
     #env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=100, dataset=FILE_NAME)
-    env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME, logger=logger)
-
+    env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME)
+    obs = env.reset()
 
     #simulate env with random action samples
     for t in range(100):
