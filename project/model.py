@@ -101,8 +101,7 @@ def reinforce(policy: Policy,
         if i_episode % print_every == 0:
             test_env.reset()
             rewards, log_probs = simulate(max_time, test_env, policy)
-            cum_reward = sum(rewards)
-            print('Episode {}\tTotal distance: {:.2f}'.format(i_episode, cum_reward))
+            print('Episode {}\tTotal distance: {:.2f}'.format(i_episode, rewards[-1]))
         
     return scores
 
@@ -119,9 +118,9 @@ if __name__ == "__main__":
     plt.show()
 
     # TEST ENV WITH LOGS
-    logger = init_logger(level="debug")
+    logger = init_logger(level="debug") #this makes a second logger, somehow need to figure out how to change log level to debug
     test_env.reset()
     rewards, _ = simulate(100, test_env, policy)
-    R = sum(rewards)
-    print(f"Episode finished with reward {R}")
+
+    print(f"Episode finished with reward {rewards[-1]}")
 
