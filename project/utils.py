@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 import re
 
-def tabu_scraper(path = "data/tabu/"):
+def tabu_scraper(path = "..data/tabu/"):
     """scrapes the benchmark dataset from Cordeau, Laporte 2003"""
     for i in range(1,21):
         instance = str(i).zfill(2)
@@ -14,7 +14,7 @@ def tabu_scraper(path = "data/tabu/"):
         filename = f"pr{instance}.txt"
         urllib.request.urlretrieve(url, path+filename)
 
-def branch_cut_scraper():
+def branch_cut_scraper(path = "..data/cordeau/"):
     """scrapes the benchmark dataset from Cordeau 2006"""
     root = "http://neumann.hec.ca/chairedistributique/data/darp/branch-and-cut/"
     page = requests.get(root).text
@@ -24,7 +24,6 @@ def branch_cut_scraper():
     for url in urls:
         filename = re.sub("(.*)//","", url)
         url = root + filename
-        path = "data/cordeau/"
         print(f"scraping {url}")
         urllib.request.urlretrieve(url, path+filename+".txt")
 

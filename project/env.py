@@ -260,10 +260,10 @@ class DarpEnv(gym.Env):
 
         #generate time window constraints
         if window:
-            start_window, end_window  = self.generate_window()
+            start_windows, end_windows  = self.generate_window()
         else:
-            start_window = np.array([0, self.time_end])
-            end_window = np.array([0, self.time_end])
+            start_windows = [np.array([0, self.time_end]) for _ in range(self.nb_requests)]
+            end_windows = [np.array([0, self.time_end]) for _ in range(self.nb_requests)]
 
         #init Driver and Target instances
         vehicles = []
@@ -280,8 +280,8 @@ class DarpEnv(gym.Env):
                             pickup_position=target_pickup_coodrs[i],
                             dropoff_position=target_dropoff_coords[i],
                             #represents the earliest and latest time, which the service may begin
-                            start_window=start_window,
-                            end_window=end_window,
+                            start_window=start_windows[i],
+                            end_window=end_windows[i],
                             max_ride_time=self.max_ride_time)
             requests.append(request)
         return vehicles, requests
@@ -458,7 +458,7 @@ class DarpEnv(gym.Env):
     def get_reward(self) -> float:
         """returns the sum of total travelled distence of all vehicles"""
         #TODO: maybe we need incremental rewards as well? depends on how we use the RL learning signal
-        return sum([vehicle.total_distance_travelled for vehicle in self.vehicles])
+        return sum([vehicle.last_distance_travelled for vehicle in self.vehicles])
 
     def is_done(self) -> bool:
         """checks if all Vehicles are returned to the end depot"""
@@ -550,11 +550,13 @@ if __name__ == "__main__":
     obs = env.reset()
 
     #simulate env with random action samples
+    cum_reward = 0
     for t in range(100):
         action = env.nearest_action_choice()
         #action = env.action_space.sample()
         obs, reward, done = env.step(action)
+        cum_reward += reward
         all_delivered = env.is_all_delivered()
         if done:
-            print(f"Episode finished after {t + 1} steps, with reward {reward}, all requests delivered: {all_delivered}")
+            print(f"Episode finished after {t + 1} steps, with reward {cum_reward}, all requests delivered: {all_delivered}")
             break
