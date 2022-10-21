@@ -2,6 +2,8 @@ import numpy as np
 import logging
 import torch
 import re
+import random
+import os
 
 def float_equality(f1: float, f2: float, eps: float=0.001) -> bool:
     return abs(f1 - f2) < eps
@@ -21,6 +23,14 @@ def get_device() -> str:
     else:
         device = 'cpu'
     return device
+
+def seed_everything(seed=42):
+  random.seed(seed)
+  os.environ['PYTHONHASHSEED'] = str(seed)
+  np.random.seed(seed)
+  torch.manual_seed(seed)
+  torch.backends.cudnn.deterministic = True
+  torch.backends.cudnn.benchmark = False
 
 
 if __name__ == "__main__":

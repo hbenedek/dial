@@ -74,6 +74,7 @@ class Request():
         self.start_window[0] = 0
         #latest i can pickup (in order to arrive until end_window[1])
         self.start_window[1] = time_end
+        logger.debug("setting new window for: start: %s, end: %s, for %s", self.start_window, self.end_window, self)
 
 
     def get_vector(self) -> List[int]:
@@ -422,11 +423,11 @@ class DarpEnv(gym.Env):
         trunk = [r.id for r in current_vehicle.trunk]
         pickups = [1 if r.state == "pickup" else 0 for r in self.requests]
         dropoffs = [1 if r.id in trunk else 0 for r in self.requests]
-        if np.array_equal(current_vehicle.position, self.end_depot):
-            stay = [0]
+        if sum(dropoffs) > 0:
+            end = [0]
         else:
-            stay = [1]
-        return torch.tensor(pickups + dropoffs + stay)
+            end = [1]
+        return torch.tensor(pickups + dropoffs + end)
 
     def step(self, action: int):
         """
@@ -461,17 +462,18 @@ class DarpEnv(gym.Env):
         #TODO: this part if a bit confusing (vehicle stays at depot, does not move and happily accepts 0 final reward)
         observation = self.representation()
         if self.are_time_windows_satisfied():
+        #if True:
             #check if vehicles returned to end depot
             done = self.is_done()
         else:
             logger.debug("ERROR: TIME WINDOW CONSTRAINTS ARE VIOLATED, ABORT EPISODE")
             done = True
-            reward = reward + self.time_end / 2
+            reward = reward + self.time_end * 4
         # check if all Requests are delivered, if not change reward
         if done and not self.is_all_delivered():
             logger.debug("ERROR: VCEHICLES RETURNED TO DEPOT BUT REQUESTS ARE NOT DELIVERED, ABORT EPISODE")
-            reward = reward + self.time_end / 2
-        if self.current_step == self.max_step:
+            reward = reward + self.time_end * 4
+        elif self.current_step == self.max_step:
             reward = self.time_end * 4
         return observation, reward, done
 
@@ -554,10 +556,13 @@ class DarpEnv(gym.Env):
     def representation(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         world = np.array([self.current_time, self.current_vehicle, coord2int(self.start_depot[1]), coord2int(self.end_depot[1])])
         requests = np.stack([r.get_vector() for r in self.requests])
-        vehicles = np.stack([v.get_vector() for v in self.vehicles])
+        if self.current_vehicle != self.nb_vehicles:
+            vehicles = np.stack(self.vehicles[self.current_vehicle].get_vector())
+        else: 
+            vehicles = np.array([0, 0, 0, 0, 0, 0, 0])
         w_tensor = torch.from_numpy(world).type(torch.FloatTensor).unsqueeze(dim=0)
         r_tensor = torch.from_numpy(requests).type(torch.FloatTensor)
-        v_tensor = torch.from_numpy(vehicles).type(torch.FloatTensor)
+        v_tensor = torch.from_numpy(vehicles).type(torch.FloatTensor).unsqueeze(dim=0)
         return w_tensor, r_tensor, v_tensor
 
 
