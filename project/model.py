@@ -9,11 +9,12 @@ from torch.distributions import Categorical
 import numpy as np
 from env import DarpEnv
 from tqdm import tqdm 
-from utils import coord2int, init_logger
+from utils import coord2int
 from data import generate_training_data, dump_training_data, load_training_data
 import time
 import copy
 import matplotlib.pyplot as plt
+from log import logger, set_level
 
 class Policy(nn.Module):
     def __init__(self, d_model=512, nhead=8, nb_actions=10, nb_tokens=4):
@@ -59,14 +60,14 @@ def simulate(max_step: int, env: DarpEnv, policy: Policy) -> Tuple[List[float], 
     return rewards, log_probs
 
 
-#TODO: change this
 def reinforce(policy: Policy,
              optimizer: torch.optim.Optimizer,
              nb_epochs: int, 
              max_time: int, 
              update_baseline: int,
              envs: List[DarpEnv],
-             test_env: DarpEnv):
+             test_env: DarpEnv,
+             relax_window: bool = False):
     #init baseline model
     baseline = copy.deepcopy(policy)
     scores = []
@@ -77,7 +78,7 @@ def reinforce(policy: Policy,
             if i_episode %  update_baseline == 0:
                 baseline.load_state_dict(policy.state_dict())
             
-            env.reset()
+            env.reset(relax_window)
             baseline_env = copy.deepcopy(env)
 
             #simulate episode with train and baseline policy
@@ -99,7 +100,7 @@ def reinforce(policy: Policy,
             optimizer.step()
             
             if i_episode % 100 == 0:
-                test_env.reset()
+                test_env.reset(relax_window)
                 rewards, log_probs = simulate(max_time, test_env, policy)
                 print('Episode {}\tTotal distance: {:.2f}'.format(i_episode, sum(rewards)))
             
@@ -119,6 +120,7 @@ if __name__ == "__main__":
     policy = Policy(d_model=128, nhead=4, nb_actions=nb_actions, nb_tokens=nb_tokens)
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
 
+    logger = set_level(logger, "info")
 
     scores = reinforce(policy=policy, 
                     optimizer=optimizer,
@@ -126,14 +128,15 @@ if __name__ == "__main__":
                     max_time=1400, 
                     update_baseline=100,
                     envs=envs,
-                    test_env=test_env)
+                    test_env=test_env,
+                    relax_window=True)
 
     plt.plot(scores)
     plt.show()
 
     #TEST ENV WITH LOGS
-    logger = init_logger(level="debug") #this makes a second logger, somehow need to figure out how to change log level to debug
-    test_env.reset()
+    logger = set_level(logger, "debug")
+    test_env.reset(relax_window=True)
     rewards, _ = simulate(1000, test_env, policy)
     #TODO: look at logs, for some reasone getting 0 cumrewards still
     print(f"Episode finished with reward {sum(rewards)}")

@@ -1,6 +1,33 @@
-from env import DarpEnv
-from typing import List
+from typing import List, Tuple
 import pickle
+import urllib
+import requests
+import numpy as np
+from bs4 import BeautifulSoup
+import re
+import sys
+from env import DarpEnv, Request, Vehicle
+
+def tabu_scraper(path = "..data/tabu/"):
+    """scrapes the benchmark dataset from Cordeau, Laporte 2003"""
+    for i in range(1,21):
+        instance = str(i).zfill(2)
+        url = f"http://neumann.hec.ca/chairedistributique/data/darp/tabu/pr{instance}"
+        filename = f"pr{instance}.txt"
+        urllib.request.urlretrieve(url, path+filename)
+
+def branch_cut_scraper(path = "..data/cordeau/"):
+    """scrapes the benchmark dataset from Cordeau 2006"""
+    root = "http://neumann.hec.ca/chairedistributique/data/darp/branch-and-cut/"
+    page = requests.get(root).text
+    soup = BeautifulSoup(page, 'html.parser')
+    urls = [root + '/' + node.get('href') for node in soup.find_all('a') if node.get('href').endswith('')][1:]
+    
+    for url in urls:
+        filename = re.sub("(.*)//","", url)
+        url = root + filename
+        print(f"scraping {url}")
+        urllib.request.urlretrieve(url, path+filename+".txt")
 
 
 def generate_training_data(
@@ -46,3 +73,6 @@ if __name__ == "__main__":
 
     path = "../data/test_sets/generated-a2-16.pkl"
     dump_training_data(envs, path)
+
+if __name__ == "__main__":
+    print(sys.path)

@@ -2,11 +2,10 @@ from logging import Logger
 from typing import Optional, Tuple, List, Dict
 import numpy as np
 import gym
+from numpy.random.mtrand import set_state
 import torch
-from utils import coord2int, float_equality, distance, init_logger
-
-logger = init_logger()
-
+from utils import coord2int, float_equality, distance
+from log import logger, set_level
 
 class Request():
     """Class for representing requests"""
@@ -54,7 +53,7 @@ class Request():
         return distance(self.pickup_position, self.dropoff_position)
 
     def tight_window(self):
-        """making the time windows as tight as possible"""
+        """make the time windows as tight as possible"""
         service_time = self.get_service_time()
         #earliest i can deliver
         self.end_window[0] = max(self.end_window[0], self.start_window[0] + service_time)
@@ -64,6 +63,18 @@ class Request():
         self.start_window[0] = max(self.start_window[0], self.end_window[0] - self.max_ride_time)
         #latest i can pickup (in order to arrive until end_window[1])
         self.start_window[1] = min(self.start_window[1], self.end_window[1] - service_time)
+
+    def relax_window(self, time_end: int):
+        """drop all window constrains"""
+        #earliest i can deliver
+        self.end_window[0] = 0
+        #latest i can deliver
+        self.end_window[1] = time_end
+        #earliest i can pickup (in order to be able to reach end_window[0] within max ride time)
+        self.start_window[0] = 0
+        #latest i can pickup (in order to arrive until end_window[1])
+        self.start_window[1] = time_end
+
 
     def get_vector(self) -> List[int]:
         """returns the vector representation of the Request"""
@@ -201,15 +212,20 @@ class DarpEnv(gym.Env):
         self.end_depot = np.empty(2)
         self.reset()
 
-    def reset(self):
+    def reset(self, relax_window: bool=False):
         """restarts/initializes the environment"""
         logger.debug("populate env instance with %s Vehicle and %s Request objects", self.nb_vehicles, self.nb_requests)
         vehicles, requests = self.populate_instance()
         self.vehicles = vehicles
         self.requests = requests
-        logger.debug("tightening window constraints for all Requests")
-        for request in requests:
-            request.tight_window()
+        if relax_window:
+            logger.debug("relaxing window constraints for all Requests")
+            for request in requests:
+                request.relax_window(self.time_end)
+        else:
+            logger.debug("tightening window constraints for all Requests")
+            for request in requests:
+                request.tight_window()
         self.waiting_vehicles = [vehicle.id for vehicle in self.vehicles]
         self.current_vehicle = self.waiting_vehicles.pop()
         logger.debug("new current vehicle selected: %s", self.current_vehicle)
@@ -406,7 +422,11 @@ class DarpEnv(gym.Env):
         trunk = [r.id for r in current_vehicle.trunk]
         pickups = [1 if r.state == "pickup" else 0 for r in self.requests]
         dropoffs = [1 if r.id in trunk else 0 for r in self.requests]
-        return torch.tensor(pickups + dropoffs + [1])
+        if np.array_equal(current_vehicle.position, self.end_depot):
+            stay = [0]
+        else:
+            stay = [1]
+        return torch.tensor(pickups + dropoffs + stay)
 
     def step(self, action: int):
         """
@@ -437,7 +457,6 @@ class DarpEnv(gym.Env):
         logger.debug("new current vehicle selected: %s", self.current_vehicle)
 
         reward = self.get_reward() 
-        #observation = self.next_observation() #TODO: get input for transformer
 
         #TODO: this part if a bit confusing (vehicle stays at depot, does not move and happily accepts 0 final reward)
         observation = self.representation()
@@ -447,12 +466,13 @@ class DarpEnv(gym.Env):
         else:
             logger.debug("ERROR: TIME WINDOW CONSTRAINTS ARE VIOLATED, ABORT EPISODE")
             done = True
-            reward = self.time_end
+            reward = reward + self.time_end / 2
         # check if all Requests are delivered, if not change reward
         if done and not self.is_all_delivered():
             logger.debug("ERROR: VCEHICLES RETURNED TO DEPOT BUT REQUESTS ARE NOT DELIVERED, ABORT EPISODE")
-            reward = self.time_end
-
+            reward = reward + self.time_end / 2
+        if self.current_step == self.max_step:
+            reward = self.time_end * 4
         return observation, reward, done
 
     def get_reward(self) -> float:
@@ -543,7 +563,7 @@ class DarpEnv(gym.Env):
 
 if __name__ == "__main__":
     #FILE_NAME = './data/cordeau/a2-16.txt'
-    #logger = init_logger()
+    logger = set_level(logger, "debug")
     FILE_NAME = '../data/test_sets/t1-2.txt'
     #env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=100, dataset=FILE_NAME)
     env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME)
