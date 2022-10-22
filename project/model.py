@@ -10,7 +10,7 @@ import numpy as np
 from env import DarpEnv
 from tqdm import tqdm 
 from utils import coord2int, seed_everything
-from data import generate_training_data, dump_training_data, load_training_data
+from data import load_training_data
 import time
 import copy
 import matplotlib.pyplot as plt
@@ -19,7 +19,7 @@ from log import logger, set_level
 class Policy(nn.Module):
     def __init__(self, d_model=512, nhead=8, nb_actions=10, nb_tokens=4):
         super(Policy, self).__init__()
-        self.world_embedding = nn.Linear(4, d_model)
+        self.world_embedding = nn.Linear(6, d_model)
         self.request_embedding = nn.Linear(11, d_model)
         self.vehicle_embedding = nn.Linear(7, d_model)
         self.encoder =  nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead)
