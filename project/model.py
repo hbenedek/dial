@@ -95,11 +95,9 @@ def reinforce(policy: Policy,
             rewards, log_probs = simulate(max_time, env, policy)
 
             #aggregate rewards and logprobs
-            #train_R = sum(rewards)
-            #baseline_R = sum(baseline_rewards)
+            train_R = sum(rewards)
+            baseline_R = sum(baseline_rewards)
             #TODO: try nb_delivered as reward signal
-            train_R = sum([r.state == "delivered" for r in env.requests])
-            baseline_R = sum([r.state == "delivered" for r in baseline_env.requests])
             sum_log_probs = sum(log_probs)
             scores.append(train_R)
 
@@ -114,11 +112,9 @@ def reinforce(policy: Policy,
             if i_episode % 100 == 0:
                 test_env.reset(relax_window)
                 rewards, log_probs = simulate(max_time, test_env, policy)
-                rewards = sum([r.state == "delivered" for r in test_env.requests])
-                logger.info('Episode {}: delivered requests: {:.2f}'.format(i_episode, rewards))
-                if rewards == test_env.nb_requests:
-                    break
-                #delivered = sum([r.state == "delivered" for r in test_env.requests])
+                delivered = sum([r.state == "delivered" for r in test_env.requests])
+                logger.info('Episode: {}, total distance: {:.2f}, delivered {}'.format(i_episode, sum(rewards), delivered))
+                
                 #in_trunk = sum([r.state == "in_trunk" for r in test_env.requests])
                 #pickup = sum([r.state == "pickup" for r in test_env.requests])
                 #print(f'delivered: {delivered}, in trunk: {in_trunk}, waiting: {pickup}')
@@ -129,7 +125,7 @@ if __name__ == "__main__":
     seed_everything(1)
     device = get_device() #TODO: pass everything to device
     FILE_NAME = '../data/cordeau/a2-16.txt'    
-    test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=1000, dataset=FILE_NAME)
+    test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=200, dataset=FILE_NAME)
     
     path = "../data/test_sets/generated-a2-16.pkl"
     envs = load_training_data(path)
