@@ -78,16 +78,15 @@ class Request():
     def get_vector(self) -> List[int]:
         """returns the vector representation of the Request"""
         vector = [self.id]
-        vector.append(coord2int(self.pickup_position[0]))
-        vector.append(coord2int(self.pickup_position[1]))
-        vector.append(coord2int(self.dropoff_position[0]))
-        vector.append(coord2int(self.dropoff_position[1]))
+        vector.append(self.pickup_position[0])
+        vector.append(self.pickup_position[1])
+        vector.append(self.dropoff_position[0])
+        vector.append(self.dropoff_position[1])
         vector.append(self.start_window[0])
         vector.append(self.start_window[1])
         vector.append(self.end_window[0])
         vector.append(self.end_window[1])
         vector.append(self.statedict[self.state])
-        vector.append(self.max_ride_time)
         return vector
 
 
@@ -123,9 +122,13 @@ class Vehicle():
         self.position = new_position
         logger.debug("%s moved to position %s", self, self.position)
 
-    def can_pickup(self, request: Request, current_time: float) -> bool:
+    def can_pickup(self, request: Request, current_time: float, ignore_window: bool=True) -> bool:
         dist = distance(self.position, request.pickup_position)
-        return len(self.trunk) < self.capacity and request.check_window(current_time + dist, start=True) and request.state == "pickup"
+        if ignore_window:
+            window = True
+        else:
+            request.check_window(current_time + dist, start=True)
+        return len(self.trunk) < self.capacity and window and request.state == "pickup"
 
     def pickup_request(self, request: Request, current_time: float):
         """given a time stamp and a request the Vehicle tries to load the request into its trunk"""
@@ -137,9 +140,13 @@ class Vehicle():
         else:
             logger.debug("ERROR: %s pickup DENIED for %s", request, self)
 
-    def can_dropoff(self, request: Request, current_time: float) -> bool:
+    def can_dropoff(self, request: Request, current_time: float, ignore_window: bool=True) -> bool:
         dist = distance(self.position, request.dropoff_position)
-        return request.check_window(current_time + dist, start=False) and request in self.trunk
+        if ignore_window:
+            window = True
+        else:
+            request.check_window(current_time + dist, start=False) 
+        return window and request in self.trunk
 
     def dropoff_request(self, request: Request, current_time: float):
         """given a time stamp and a request the Vehicle tries to unload the request from its trunk"""
@@ -152,14 +159,13 @@ class Vehicle():
 
     def set_state(self, state: str):
         """state of the Vehicle is either waiting, busy or finished"""
-        logger.debug( "setting new state: %s -> %s", self, state)
+        logger.debug("setting new state: %s -> %s", self, state)
         self.state = state
 
     def get_vector(self) -> List[int]:
-        """returns the vector representation of the Request"""
-        vector = [self.max_route_duration,
-                coord2int(self.position[0]),
-                coord2int(self.position[1]),
+        """returns the vector representation of the Vehicle"""
+        vector = [self.position[0],
+                self.position[1],
                 self.statedict[self.state]]
         trunk =  [r.id for r in self.trunk]
         trunk = trunk + [0] * (self.capacity - len(self.trunk))

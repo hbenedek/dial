@@ -3,7 +3,6 @@ from typing import Optional, Tuple, List, Dict
 from gym.core import RewardWrapper
 import numpy as np
 import gym
-from numpy.random.mtrand import set_state
 import torch
 from utils import coord2int, float_equality, distance
 from log import logger, set_level
@@ -225,7 +224,7 @@ class DarpEnv(gym.Env):
 
         done = self.is_done()
         if done:
-            logger.debug("DONEEE")
+            logger.debug("DONE")
         # check if all Requests are delivered, if not change reward
         if done and not self.is_all_delivered():
             logger.debug("ERROR: VCEHICLES RETURNED TO DEPOT BUT REQUESTS ARE NOT DELIVERED, ABORT EPISODE")
@@ -237,10 +236,10 @@ class DarpEnv(gym.Env):
             done = False
 
         if self.current_step >= self.max_step:
-            reward = self.time_end * 4
+            reward = self.time_end * 10
             done = True
         if self.current_time >= self.time_end:
-            reward = self.time_end * 4
+            reward = self.time_end * 10
             done = True
 
         observation = self.representation()
@@ -263,10 +262,10 @@ class DarpEnv(gym.Env):
 
     def penalize_broken_time_windows(self, reward: float) -> bool:
         """checks if start, end time windows are satisfied, if not penalise"""
-        start = [self.current_time <= r.start_window[1] for r in self.requests if r.state == "pickup"]
-        end = [self.current_time <= r.end_window[1] for r in self.requests if r.state in ["pickup", "in_trunk"]]
-        max_ride_time = [self.current_time - r.pickup_time < r.max_ride_time for r in self.requests if r.state == "in_trunk"] 
-        max_route_duration = [v.total_distance_travelled <= self.max_route_duration for v in self.vehicles]
+        start = [self.current_time > r.start_window[1] for r in self.requests if r.state == "pickup"]
+        end = [self.current_time > r.end_window[1] for r in self.requests if r.state in ["pickup", "in_trunk"]]
+        max_ride_time = [self.current_time - r.pickup_time > r.max_ride_time for r in self.requests if r.state == "in_trunk"] 
+        max_route_duration = [v.total_distance_travelled >= self.max_route_duration for v in self.vehicles]
         reward += sum(start + end + max_route_duration + max_ride_time)
         return reward
 
@@ -279,14 +278,14 @@ class DarpEnv(gym.Env):
         choice_id, choice_dist = None, np.inf #(request id, distance to target)
         for request in self.requests:
             #potential pickup
-            if vehicle.can_pickup(request, self.current_time):
+            if vehicle.can_pickup(request, self.current_time, ignore_window=True):
                 if request.id not in self.already_assigned:
                     dist = distance(vehicle.position, request.pickup_position)
                     if choice_dist > dist:
                         choice_id, choice_dist = request.id, dist
 
             #potential Dropoff
-            elif vehicle.can_dropoff(request, self.current_time):
+            elif vehicle.can_dropoff(request, self.current_time, ignore_window=True):
                 dist = distance(vehicle.position, request.dropoff_position)
                 if choice_dist > dist:
                     choice_id, choice_dist = request.id + self.nb_requests, dist
@@ -300,10 +299,12 @@ class DarpEnv(gym.Env):
     def representation(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         world = np.array([self.current_time, 
                     self.current_vehicle, 
-                    coord2int(self.start_depot[0]),
-                    coord2int(self.start_depot[1]),
-                    coord2int(self.end_depot[0]),
-                    coord2int(self.end_depot[1])])
+                    self.start_depot[0],
+                    self.start_depot[1],
+                    self.end_depot[0],
+                    self.end_depot[1],
+                    self.max_ride_time,
+                    self.max_route_duration])
         requests = np.stack([r.get_vector() for r in self.requests])
         if self.current_vehicle != self.nb_vehicles:
             vehicles = np.stack(self.vehicles[self.current_vehicle].get_vector())
@@ -316,11 +317,11 @@ class DarpEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    #FILE_NAME = '../data/cordeau/a2-16.txt'
     logger = set_level(logger, "debug")
-    FILE_NAME = '../data/test_sets/t1-2.txt'
-    #env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=1000, dataset=FILE_NAME)
-    env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME)
+    FILE_NAME = 'data/cordeau/a2-16.txt'
+    #FILE_NAME = 'data/test_sets/t1-2.txt'
+    env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=1000, dataset=FILE_NAME)
+    #env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME)
     obs = env.reset()
 
     #simulate env with random action samples
@@ -332,8 +333,7 @@ if __name__ == "__main__":
         rewards.append(reward)
         all_delivered = env.is_all_delivered()
         if done:
-            print(rewards)
-            print(f"Episode finished after {t + 1} steps, with reward {rewards[-1]}, all requests delivered: {all_delivered}")
+            print(f"Episode finished after {t + 1} steps, with reward {sum(rewards)}, all requests delivered: {all_delivered}")
             break
     delivered =  sum([request.state == "delivered" for request in env.requests])
     if not done:

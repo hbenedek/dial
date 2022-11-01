@@ -196,5 +196,5 @@ if __name__ == "__main__":
                         max_ride_time=30,
                         window=True)
 
-    path = "../data/test_sets/generated-a2-16.pkl"
+    path = "data/test_sets/generated-a2-16.pkl"
     dump_training_data(envs, path)
