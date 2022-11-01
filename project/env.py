@@ -168,7 +168,8 @@ class DarpEnv(gym.Env):
                             vehicle.set_state("waiting")
                     elif np.array_equal(self.end_depot, vehicle.position):
                         vehicle.set_state("finished")
-                        self.update_needed = True
+                        if any([vehicle.state != "finished" for vehicle in self.vehicles]):
+                            self.update_needed = True
 
                 #move vehicle closer to its destination
                 elif self.last_time_gap < dist_to_destination:
@@ -223,7 +224,8 @@ class DarpEnv(gym.Env):
         reward = self.penalize_broken_time_windows(reward)
 
         done = self.is_done()
-
+        if done:
+            logger.debug("DONEEE")
         # check if all Requests are delivered, if not change reward
         if done and not self.is_all_delivered():
             logger.debug("ERROR: VCEHICLES RETURNED TO DEPOT BUT REQUESTS ARE NOT DELIVERED, ABORT EPISODE")
@@ -314,11 +316,11 @@ class DarpEnv(gym.Env):
 
 
 if __name__ == "__main__":
-    FILE_NAME = '../data/cordeau/a2-16.txt'
+    #FILE_NAME = '../data/cordeau/a2-16.txt'
     logger = set_level(logger, "debug")
-    #FILE_NAME = '../data/test_sets/t1-2.txt'
-    env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=1000, dataset=FILE_NAME)
-    #env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME)
+    FILE_NAME = '../data/test_sets/t1-2.txt'
+    #env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=1000, dataset=FILE_NAME)
+    env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME)
     obs = env.reset()
 
     #simulate env with random action samples
@@ -330,6 +332,7 @@ if __name__ == "__main__":
         rewards.append(reward)
         all_delivered = env.is_all_delivered()
         if done:
+            print(rewards)
             print(f"Episode finished after {t + 1} steps, with reward {rewards[-1]}, all requests delivered: {all_delivered}")
             break
     delivered =  sum([request.state == "delivered" for request in env.requests])
