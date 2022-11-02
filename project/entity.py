@@ -3,6 +3,7 @@ import numpy as np
 from log import logger
 from typing import Optional, Tuple, List, Dict
 from utils import float_equality, distance, coord2int
+import pickle
 
     
 class Request():
@@ -170,3 +171,12 @@ class Vehicle():
         trunk =  [r.id for r in self.trunk]
         trunk = trunk + [0] * (self.capacity - len(self.trunk))
         return vector + trunk
+
+
+class Result():
+    def __init__(self, id, train_loss, test_loss, policy_dict):
+        self.id = id
+        self.train_loss = train_loss
+        self.test_loss = test_loss
+        self.policy_dict = policy_dict
+

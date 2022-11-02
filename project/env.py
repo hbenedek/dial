@@ -7,7 +7,7 @@ import torch
 from utils import coord2int, float_equality, distance
 from log import logger, set_level
 from entity import Request, Vehicle
-import data
+import generator
 
 class DarpEnv(gym.Env):
     """Custom Environment that follows gym interface"""
@@ -104,7 +104,7 @@ class DarpEnv(gym.Env):
         the function returns a list of vehicle and requests instances
         depending either by random generating or loading a cordeau instance
         """
-        return data.parse_data(self.datadir) if self.datadir else data.generate_instance(self.seed,
+        return generator.parse_data(self.datadir) if self.datadir else generator.generate_instance(self.seed,
                                                                                         self.size,
                                                                                         self.nb_vehicles,
                                                                                         self.nb_requests,
@@ -274,7 +274,7 @@ class DarpEnv(gym.Env):
         Given the current environment configuration, returns the closest possible destination for the current vehicle
         among potential pickups and dropoffs
         """
-        vehicle = env.vehicles[self.current_vehicle]
+        vehicle = self.vehicles[self.current_vehicle]
         choice_id, choice_dist = None, np.inf #(request id, distance to target)
         for request in self.requests:
             #potential pickup
@@ -292,7 +292,7 @@ class DarpEnv(gym.Env):
     
         #goto end depot
         if choice_id is None:
-            choice_id = env.nb_requests * 2
+            choice_id = self.nb_requests * 2
         return choice_id
 
 

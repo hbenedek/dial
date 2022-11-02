@@ -10,14 +10,14 @@ import numpy as np
 from env import DarpEnv
 from tqdm import tqdm 
 from utils import coord2int, seed_everything
-from data import load_training_data, dump_training_data
+from generator import load_data, dump_data
 import time
 import copy
 import matplotlib.pyplot as plt
 from log import logger, set_level
 
 class Policy(nn.Module):
-    def __init__(self, device: str, d_model: int=512, nhead: int=8, nb_requests: int=16):
+    def __init__(self, d_model: int=512, nhead: int=8, nb_requests: int=16):
         super(Policy, self).__init__()
         self.nb_actions = nb_requests * 2 + 1
         self.nb_tokens = nb_requests + 1 + 1
@@ -25,45 +25,50 @@ class Policy(nn.Module):
         self.request_embedding = nn.Linear(10, d_model)
         self.vehicle_embedding = nn.Linear(6, d_model)
         self.encoder =  nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead)
-        self.softmax = nn.Softmax(dim=1)
+        #self.softmax = nn.Softmax(dim=1)
         self.classifier = nn.Linear(self.nb_tokens * d_model, self.nb_actions) 
         self.dropout = nn.Dropout(0.1)
-        self.device = device
+        self.device = get_device()
+        self.to(self.device)
 
     def forward(self, state):
         world, requests, vehicles = state 
-        world = world.to(self.device)
+        world = world.to(self.device) # world.size() (bsz, nb_tokens, embed)
         requests = requests.to(self.device)
         vehicles = vehicles.to(self.device)
         w = self.world_embedding(world)
         r = self.request_embedding(requests)
         v = self.vehicle_embedding(vehicles)
-        x = torch.cat((w,r, v), dim=0).unsqueeze(dim=1) # x.size() = (nb_tokens, bsz, embed)
+        x = torch.cat((w,r, v), dim=1) # x.size() = (bsz, nb_tokens, embed)
+        x = x.permute([1,0,2]) # x.size() = (nb_tokens, bsz, embed)
         x = self.dropout(x)
         x = self.encoder(x)
         x = x.permute([1,0,2]).flatten(start_dim=1)
         x = self.classifier(x)
-        return self.softmax(x)
+        return x
     
     def act(self, state, mask):
-        probs = self.forward(state).cpu()
-        probs = probs * mask
+        out = self.forward(state).cpu()
+        out = out * mask
+        probs = nn.Softmax(dim=1)(out)
         m = Categorical(probs)
         action = m.sample()
         return action.item(), m.log_prob(action)
 
     def greedy(self, state, mask):
-        probs = self.forward(state).cpu()
-        probs = probs * mask
+        out = self.forward(state).cpu()
+        out = out * mask
+        probs = nn.Softmax(dim=1)(out)
         m = Categorical(probs)
         action = probs.max(1)[1].view(1, 1)
-        return action, m.log_prob(action)
+        return action.item(), m.log_prob(action)
 
 
 def simulate(max_step: int, env: DarpEnv, policy: Policy, greedy: bool=False) -> Tuple[List[float], List[float]]:
     rewards = []
     log_probs = []
-    state = env.representation()
+    world, requests, vehicle = env.representation()
+    state = [world.unsqueeze(0), requests.unsqueeze(0), vehicle.unsqueeze(0)]
     for t in range(max_step):
         mask = env.mask_illegal()
         if sum(mask) == 0:
@@ -73,6 +78,8 @@ def simulate(max_step: int, env: DarpEnv, policy: Policy, greedy: bool=False) ->
         else:
             action, log_prob = policy.act(state, mask)
         state, reward, done = env.step(action)
+        world, requests, vehicle  = state
+        state = [world.unsqueeze(0), requests.unsqueeze(0), vehicle.unsqueeze(0)]
         rewards.append(reward)
         log_probs.append(log_prob)
         if done:
@@ -148,26 +155,26 @@ if __name__ == "__main__":
     device = get_device() 
     FILE_NAME = 'data/cordeau/a2-16.txt'    
     test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=200, dataset=FILE_NAME)
-    
-    path = "data/test_sets/generated-a2-16.pkl"
-    envs = load_training_data(path)
+    print([r for r in test_env.vehicles])
 
-    policy = Policy(d_model=100, nhead=4, nb_requests=16, device=device)
-    policy = policy.to(device)
+    path = "data/test_sets/generated-a2-16.pkl"
+    envs = load_data(path)
+
+    policy = Policy(d_model=100, nhead=4, nb_requests=16)
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
 
     logger = set_level(logger, "info")
     
     scores, tests = reinforce(policy=policy, 
                      optimizer=optimizer,
-                     nb_epochs=5, 
+                     nb_epochs=1, 
                      max_step=100, 
                      update_baseline=100,
                      envs=envs,
                      test_env=test_env,
                      relax_window=False)
-    dump_training_data(scores, "models/scores.pkl")
-    dump_training_data(tests, "models/tests.pkl")
+    dump_data(scores, "models/scores.pkl")
+    dump_data(tests, "models/tests.pkl")
     PATH = "models/test.pth"
     torch.save(policy.state_dict(), PATH)
     # fig, ax = plt.subplots(1,1,figsize=(10,10))
