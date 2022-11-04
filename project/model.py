@@ -17,32 +17,61 @@ import matplotlib.pyplot as plt
 from log import logger, set_level
 
 class Policy(nn.Module):
-    def __init__(self, d_model: int=512, nhead: int=8, nb_requests: int=16):
+    def __init__(self, d_model: int=512, nhead: int=8, nb_requests: int=16, nb_vehicles: int=2, num_layers: int=2, time_end: int=1400, env_size: int=10):
         super(Policy, self).__init__()
         self.nb_actions = nb_requests * 2 + 1
         self.nb_tokens = nb_requests + 1 + 1
-        self.world_embedding = nn.Linear(8, d_model)
-        self.request_embedding = nn.Linear(10, d_model)
-        self.vehicle_embedding = nn.Linear(6, d_model)
+        #self.world_embedding = nn.Linear(8, d_model)
+        #self.request_embedding = nn.Linear(10, d_model)
+        #self.vehicle_embedding = nn.Linear(6, d_model)
         self.encoder =  nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead)
-        #self.softmax = nn.Softmax(dim=1)
+        self.encoders = nn.TransformerEncoder(self.encoder, num_layers=num_layers)
         self.classifier = nn.Linear(self.nb_tokens * d_model, self.nb_actions) 
-        self.dropout = nn.Dropout(0.1)
         self.device = get_device()
         self.to(self.device)
 
+        # Request embeddings
+        self.embed_time = nn.Embedding(time_end, d_model) #for all window constraints
+        self.embed_position = nn.Embedding(env_size * 2 * 10, d_model)
+        self.embed_request_id = nn.Embedding(nb_requests + 1, d_model)
+        self.embed_request_status = nn.Embedding(3, d_model)
+
+        # Vehicle embeddings 
+        self.embed_vehicle_status = nn.Embedding(3, d_model)
+        
+        #World embeddings
+        self.embed_current_vehicle = nn.Embedding(nb_vehicles, d_model)
+
+    def embeddings(self, world, requests, vehicles):
+        x = [self.embed_time(world[0].long().to(device))]
+        self.embed_time(world[6].long().to(device))
+        self.embed_time(world[7].long().to(device))
+        x.append(self.embed_current_vehicle(world[1].long().to(device)))
+        x.append(self.embed_position(world[2].long().to(device)))
+        x.append(self.embed_position(world[3].long().to(device)))
+        x.append(self.embed_position(world[4].long().to(device)))
+        x.append(self.embed_position(world[5].long().to(device)))
+        world = np.array([self.current_time, 
+                    
+                    self.max_ride_time,
+                    self.max_route_duration])
+    
+
     def forward(self, state):
         world, requests, vehicles = state 
+
+        w, r, v = self.embeddings(world, requests, vehicles)
+
         world = world.to(self.device) # world.size() (bsz, nb_tokens, embed)
         requests = requests.to(self.device)
         vehicles = vehicles.to(self.device)
-        w = self.world_embedding(world)
-        r = self.request_embedding(requests)
-        v = self.vehicle_embedding(vehicles)
-        x = torch.cat((w,r, v), dim=1) # x.size() = (bsz, nb_tokens, embed)
+        #w = self.world_embedding(world)
+        #r = self.request_embedding(requests)
+        #v = self.vehicle_embedding(vehicles)
+        
+        x = torch.cat((w, r, v), dim=1) # x.size() = (bsz, nb_tokens, embed)
         x = x.permute([1,0,2]) # x.size() = (nb_tokens, bsz, embed)
-        x = self.dropout(x)
-        x = self.encoder(x)
+        x = self.encoders(x)
         x = x.permute([1,0,2]).flatten(start_dim=1)
         x = self.classifier(x)
         return x
@@ -107,10 +136,10 @@ def reinforce(policy: Policy,
         logger.info("*** EPOCH %s ***", i_epoch)
         for i_episode, env in enumerate(envs):
             #update baseline model after every 500 steps
-            #if i_episode % update_baseline == 0:
-            #    #if train_R >= baseline_R:
-            #    logger.info("new baseline model selected after achiving %s reward", train_R)
-            #    baseline.load_state_dict(policy.state_dict())
+            if i_episode % update_baseline == 0:
+                if train_R >= baseline_R:
+                    logger.info("new baseline model selected after achiving %s reward", train_R)
+                    baseline.load_state_dict(policy.state_dict())
 
             env.reset(relax_window)
             baseline_env = copy.deepcopy(env)
@@ -160,21 +189,20 @@ if __name__ == "__main__":
     path = "data/test_sets/generated-a2-16.pkl"
     envs = load_data(path)
 
-    policy = Policy(d_model=100, nhead=4, nb_requests=16)
+    policy = Policy(d_model=128, nhead=4, nb_requests=16)
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
 
     logger = set_level(logger, "info")
     
     scores, tests = reinforce(policy=policy, 
                      optimizer=optimizer,
-                     nb_epochs=1, 
-                     max_step=100, 
+                     nb_epochs=10, 
                      update_baseline=100,
                      envs=envs,
                      test_env=test_env,
                      relax_window=False)
-    dump_data(scores, "models/scores.pkl")
-    dump_data(tests, "models/tests.pkl")
+    #dump_data(scores, "models/scores.pkl")
+    #dump_data(tests, "models/tests.pkl")
     PATH = "models/test.pth"
     torch.save(policy.state_dict(), PATH)
     # fig, ax = plt.subplots(1,1,figsize=(10,10))

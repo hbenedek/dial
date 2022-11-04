@@ -295,7 +295,11 @@ class DarpEnv(gym.Env):
             choice_id = self.nb_requests * 2
         return choice_id
 
+    #self.embed_position = nn.Embedding(2 * self.size * 100, d_model)
+    #self.embed_time = nn.Embedding(1440 * 10 + 1, d_model)
+    #self.embed_status = nn.Embedding(3, d_model)
 
+    #TODO: use embeddings to have a more complex representation
     def representation(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         world = np.array([self.current_time, 
                     self.current_vehicle, 
@@ -307,13 +311,13 @@ class DarpEnv(gym.Env):
                     self.max_route_duration])
         requests = np.stack([r.get_vector() for r in self.requests])
         if self.current_vehicle != self.nb_vehicles:
-            vehicles = np.stack(self.vehicles[self.current_vehicle].get_vector())
+            vehicle = np.stack(self.vehicles[self.current_vehicle].get_vector())
         else: 
-            vehicles = np.array([0, 0, 0, 0, 0, 0, 0])
-        w_tensor = torch.from_numpy(world).type(torch.FloatTensor).unsqueeze(dim=0)
-        r_tensor = torch.from_numpy(requests).type(torch.FloatTensor)
-        v_tensor = torch.from_numpy(vehicles).type(torch.FloatTensor).unsqueeze(dim=0)
-        return w_tensor, r_tensor, v_tensor
+            vehicle = np.array([0, 0, 0, 0, 0, 0, 0])
+        #w_tensor = torch.from_numpy(world).type(torch.FloatTensor).unsqueeze(dim=0)
+        #r_tensor = torch.from_numpy(requests).type(torch.FloatTensor)
+        #v_tensor = torch.from_numpy(vehicles).type(torch.FloatTensor).unsqueeze(dim=0)
+        return world, requests, vehicle
 
 
 if __name__ == "__main__":

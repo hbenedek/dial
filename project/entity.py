@@ -174,9 +174,13 @@ class Vehicle():
 
 
 class Result():
-    def __init__(self, id, train_loss, test_loss, policy_dict):
+    def __init__(self, id):
         self.id = id
-        self.train_loss = train_loss
-        self.test_loss = test_loss
-        self.policy_dict = policy_dict
+        self.train_loss = None
+        self.test_loss = None
+        self.accuracy = None
+        self.policy_dict = None
+        self.batch_size = None
+        self.d_model = None
+        self.layers = None
 

@@ -173,9 +173,9 @@ def generate_training_data(
         envs.append(env)
     return envs
 
-def dump_data(envs, file: str):
+def dump_data(object, file: str):
     with open(file, 'wb') as handle:
-        pickle.dump(envs , handle, protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(object , handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def load_data(file: str):
@@ -185,7 +185,7 @@ def load_data(file: str):
 
 if __name__ == "__main__":
         
-    envs = generate_training_data(N=1000,
+    envs = generate_training_data(N=10000,
                         size= 10, 
                         nb_vehicles=2,
                         nb_requests=16,
@@ -196,5 +196,5 @@ if __name__ == "__main__":
                         max_ride_time=30,
                         window=True)
 
-    path = "data/test_sets/generated-a2-16.pkl"
+    path = "data/test_sets/generated-10000-a2-16.pkl"
     dump_data(envs, path)
