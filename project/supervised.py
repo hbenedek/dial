@@ -13,16 +13,12 @@ from utils import get_device
 
 def generate_supervised_dataset(max_step: int, envs: List[DarpEnv], test_size: float, batch_size: int) -> Tuple[DataLoader, DataLoader]:
     dataset = []
-    i = 0
     for env in envs:
         obs = env.reset()
         for _ in range(max_step):
-            i = i + 1
             action = env.nearest_action_choice()
             dataset.append([obs, action])
             obs, _, done = env.step(action)
-            if i > 5000:
-                break
             if done:
                 break
 
@@ -140,7 +136,7 @@ if __name__ == "__main__":
     max_steps = 100
     test_size = 0.05
     batch_size = 512
-    policy = Policy(d_model=128, nhead=8, nb_requests=16)
+    policy = Policy(d_model=512, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=2, time_end=1440, env_size=10)
     device = get_device()
     policy = policy.to(device)
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4, weight_decay=1e-3)
@@ -154,8 +150,9 @@ if __name__ == "__main__":
     for i, data in enumerate(train_loader):
         states, supervised_actions = data
         world, requests, vehicles = states 
-        logger.info("min %s max%s", min(world[0]), max(world[0]))
-        out = policy(states)
+        w, r, v = policy.embeddings(world, requests, vehicles)
+        
+        #out = policy(states)
     #result = supervised_trainer(envs_path, result_path, max_steps, test_size, batch_size, policy, optimizer, id) 
 
 

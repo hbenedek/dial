@@ -51,17 +51,19 @@ class Request():
     def get_service_time(self):
         return distance(self.pickup_position, self.dropoff_position)
 
-    def tight_window(self):
+    def tight_window(self, time_end: int):
         """make the time windows as tight as possible"""
+
+        filter = lambda x: min(max(0, x), time_end)
         service_time = self.get_service_time()
         #earliest i can deliver
-        self.end_window[0] = max(self.end_window[0], self.start_window[0] + service_time)
+        self.end_window[0] = filter(max(self.end_window[0], self.start_window[0] + service_time))
         #latest i can deliver
-        self.end_window[1] = min(self.end_window[1], self.start_window[1] + self.max_ride_time)
+        self.end_window[1] = filter(min(self.end_window[1], self.start_window[1] + self.max_ride_time))
         #earliest i can pickup (in order to be able to reach end_window[0] within max ride time)
-        self.start_window[0] = max(self.start_window[0], self.end_window[0] - self.max_ride_time)
+        self.start_window[0] = filter(max(self.start_window[0], self.end_window[0] - self.max_ride_time))
         #latest i can pickup (in order to arrive until end_window[1])
-        self.start_window[1] = min(self.start_window[1], self.end_window[1] - service_time)
+        self.start_window[1] = filter(min(self.start_window[1], self.end_window[1] - service_time))
 
     def relax_window(self, time_end: int):
         """drop all window constrains"""

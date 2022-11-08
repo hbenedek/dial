@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from log import logger, set_level
 
 class Policy(nn.Module):
-    def __init__(self, d_model: int=512, nhead: int=8, nb_requests: int=16, nb_vehicles: int=2, num_layers: int=2, time_end: int=1400, env_size: int=10):
+    def __init__(self, d_model: int=512, nhead: int=8, nb_requests: int=16, nb_vehicles: int=2, num_layers: int=2, time_end: int=1440, env_size: int=10):
         super(Policy, self).__init__()
         self.nb_actions = nb_requests * 2 + 1
         self.nb_tokens = 8 + nb_requests * 10 + 6
@@ -32,16 +32,12 @@ class Policy(nn.Module):
         self.classifier = nn.Linear(self.nb_tokens * d_model, self.nb_actions) 
 
 
-        #Request embeddings
+        #time, position and status embeddings
         self.embed_time = nn.Embedding(time_end * 10 + 1, d_model) 
         self.embed_position = nn.Embedding(env_size * 2 * 10 + 1, d_model)
         self.embed_request_id = nn.Embedding(nb_requests + 1, d_model)
         self.embed_request_status = nn.Embedding(3, d_model)
-
-        #Vehicle embeddings 
         self.embed_vehicle_status = nn.Embedding(3, d_model)
-        
-        #World embeddings
         self.embed_current_vehicle = nn.Embedding(nb_vehicles, d_model)
 
     def embeddings(self, world, requests, vehicles):

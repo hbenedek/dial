@@ -133,16 +133,16 @@ def parse_data(datadir: str) -> Tuple[List[Vehicle], List[Request], List[np.ndar
 
 def generate_window(nb_requests: int, time_end: int, max_ride_time: int) -> Tuple[List[np.ndarray], List[np.ndarray]]:
         #FIXME: this method does not seem very sophisticated, copied from Pawal's code
-        """Generate 50% of free dropof conditions, and 50% of free pickup time conditions time windows for Requests"""
+        """Generate 50% of free dropoff conditions, and 50% of free pickup time conditions time windows for Requests"""
         start_windows = []
         end_windows = []
         for j in range(nb_requests):
             # Generate start and end point for window
             start = np.random.randint(0, time_end * 0.9) 
-            end = np.random.randint(start + 15, start + 45)
+            end = min(np.random.randint(start + 15, start + 45), time_end)
             #free pickup condition
             if j < nb_requests // 2:
-                start_fork = [max(0, start - max_ride_time), end]
+                start_fork = [max(0, start - max_ride_time), time_end]
                 end_fork = [start, end]
             #free dropoff condition
             else:
@@ -189,7 +189,7 @@ if __name__ == "__main__":
                         size= 10, 
                         nb_vehicles=2,
                         nb_requests=16,
-                        time_end=1400,
+                        time_end=1440,
                         max_step=1000,
                         max_route_duration=480,
                         capacity=3,
