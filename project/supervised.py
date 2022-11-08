@@ -8,6 +8,7 @@ from log import logger
 from torch.utils.data import DataLoader
 from entity import Result
 from generator import dump_data, load_data
+from utils import get_device
 
 
 def generate_supervised_dataset(max_step: int, envs: List[DarpEnv], test_size: float, batch_size: int) -> Tuple[DataLoader, DataLoader]:
@@ -16,11 +17,11 @@ def generate_supervised_dataset(max_step: int, envs: List[DarpEnv], test_size: f
     for env in envs:
         obs = env.reset()
         for _ in range(max_step):
-            i += 1
+            i = i + 1
             action = env.nearest_action_choice()
             dataset.append([obs, action])
             obs, _, done = env.step(action)
-            if i > 100:
+            if i > 5000:
                 break
             if done:
                 break
@@ -40,7 +41,10 @@ def copycat_trainer(policy: Policy,
              train_loader: DataLoader,
              test_loader: DataLoader,
              id: str) -> Result:
-    """Trains the Transformer policy network against the nearest neighbour policy"""
+    """
+    Trains the Transformer policy network against other policies depending on the dataloaders 
+    (for the moment the nearest neighbour policy)
+    """
     criterion = nn.CrossEntropyLoss()
     train_losses = []
     test_losses = []
@@ -131,16 +135,28 @@ def supervised_trainer(envs_path: str,
 
 
 if __name__ == "__main__":
-    envs_path = "data/processed/generated-a2-16.pkl"
+    envs_path = "data/processed/generated-10000-a2-16.pkl"
     result_path = "models"
     max_steps = 100
     test_size = 0.05
-    batch_size = 128
+    batch_size = 512
     policy = Policy(d_model=128, nhead=8, nb_requests=16)
+    device = get_device()
+    policy = policy.to(device)
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4, weight_decay=1e-3)
-    id = "result-a2-16-supervised-nn-04"
+    id = "result-a2-16-supervised-nn-05"
 
-    result = supervised_trainer(envs_path, result_path, max_steps, test_size, batch_size, policy, optimizer, id) 
+    envs = load_data(envs_path)
+    logger.info("dataset successfully loaded")
+
+    train_loader, test_loader = generate_supervised_dataset(max_step=max_steps, envs=envs, test_size=test_size, batch_size=batch_size)
+    logger.info("train and test DataLoader objects successfully initialized")
+    for i, data in enumerate(train_loader):
+        states, supervised_actions = data
+        world, requests, vehicles = states 
+        logger.info("min %s max%s", min(world[0]), max(world[0]))
+        out = policy(states)
+    #result = supervised_trainer(envs_path, result_path, max_steps, test_size, batch_size, policy, optimizer, id) 
 
 
 

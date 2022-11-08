@@ -25,7 +25,6 @@ class Policy(nn.Module):
         self.device = get_device()
         self.time_end = time_end
         self.env_size = env_size
-        self.to(self.device)
         
         #Transformers
         self.encoder =  nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead)
@@ -89,7 +88,6 @@ class Policy(nn.Module):
     def forward(self, state):
         world, requests, vehicles = state 
         w, r, v = self.embeddings(world, requests, vehicles)
-
         
         x = torch.cat((w, r, v), dim=1) #x.size() = (bsz, nb_tokens, embed)
         x = x.permute([1,0,2]) #x.size() = (nb_tokens, bsz, embed)
@@ -122,8 +120,6 @@ def simulate(max_step: int, env: DarpEnv, policy: Policy, greedy: bool=False) ->
     state = [torch.tensor(world).unsqueeze(0), torch.tensor(requests).unsqueeze(0), torch.tensor(vehicle).unsqueeze(0)]
     for t in range(max_step):
         mask = env.mask_illegal()
-        if sum(mask) == 0:
-            print("WARNING THIS SHIT CANNOT HAPPEN")
         if greedy:
             action, log_prob = policy.greedy(state, mask)
         else:
@@ -158,28 +154,27 @@ def reinforce(policy: Policy,
         for i_episode, env in enumerate(envs):
             print(i_episode)
             #update baseline model after every 500 steps
-            if i_episode % update_baseline == 0:
-                if train_R >= baseline_R:
-                    logger.info("new baseline model selected after achiving %s reward", train_R)
-                    baseline.load_state_dict(policy.state_dict())
+            #if i_episode % update_baseline == 0:
+            #    if train_R >= baseline_R:
+            #        logger.info("new baseline model selected after achiving %s reward", train_R)
+            #        baseline.load_state_dict(policy.state_dict())
 
             env.reset()
-            baseline_env = copy.deepcopy(env)
+            #baseline_env = copy.deepcopy(env)
 
             #simulate episode with train and baseline policy
-            with torch.no_grad():
-                baseline_rewards, _ = simulate(max_step, baseline_env, baseline, greedy=True)
+            #with torch.no_grad():
+            #    baseline_rewards, _ = simulate(max_step, baseline_env, baseline, greedy=True)
                 
             rewards, log_probs = simulate(max_step, env, policy)
 
             #aggregate rewards and logprobs
             train_R = sum(rewards)
-            baseline_R = sum(baseline_rewards)
-            #TODO: try nb_delivered as reward signal
+            #baseline_R = sum(baseline_rewards)
             sum_log_probs = sum(log_probs)
             scores.append(train_R)
 
-            policy_loss = torch.mean(- (train_R - baseline_R) * sum_log_probs)
+            policy_loss = torch.mean(-train_R * sum_log_probs)
         
             #backpropagate
             optimizer.zero_grad()
@@ -200,6 +195,11 @@ def reinforce(policy: Policy,
                 logger.info(f'delivered: {delivered}, in trunk: {in_trunk}, waiting: {pickup}')
             
     return scores, tests
+
+def reinforce_trainer(envs_path: str):
+    envs = load_data(path)
+    pass
+
 
 if __name__ == "__main__":
     seed_everything(1)
