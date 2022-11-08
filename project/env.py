@@ -247,7 +247,6 @@ class DarpEnv(gym.Env):
 
     def get_reward(self) -> float:
         """returns the sum of total travelled distence of all vehicles"""
-        #TODO: maybe we need incremental rewards as well? depends on how we use the RL learning signal
         return sum([vehicle.last_distance_travelled for vehicle in self.vehicles])
 
     def is_done(self) -> bool:
@@ -261,11 +260,11 @@ class DarpEnv(gym.Env):
         return all(is_delivered)
 
     def penalize_broken_time_windows(self, reward: float) -> bool:
-        """checks if start, end time windows are satisfied, if not penalise"""
-        start = [self.current_time > r.start_window[1] for r in self.requests if r.state == "pickup"]
-        end = [self.current_time > r.end_window[1] for r in self.requests if r.state in ["pickup", "in_trunk"]]
-        max_ride_time = [self.current_time - r.pickup_time > r.max_ride_time for r in self.requests if r.state == "in_trunk"] 
-        max_route_duration = [v.total_distance_travelled >= self.max_route_duration for v in self.vehicles]
+        """checks if start, end time windows are satisfied, if not penalise linearly"""
+        start = [max(0, self.current_time - r.start_window[1]) for r in self.requests if r.state == "pickup"]
+        end = [max(0, self.current_time - r.end_window[1]) for r in self.requests if r.state in ["pickup", "in_trunk"]]
+        max_ride_time = [max(0, self.current_time - r.pickup_time - r.max_ride_time) for r in self.requests if r.state == "in_trunk"] 
+        max_route_duration = [max(0, v.total_distance_travelled - self.max_route_duration) for v in self.vehicles]
         reward += sum(start + end + max_route_duration + max_ride_time)
         return reward
 

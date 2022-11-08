@@ -20,61 +20,83 @@ class Policy(nn.Module):
     def __init__(self, d_model: int=512, nhead: int=8, nb_requests: int=16, nb_vehicles: int=2, num_layers: int=2, time_end: int=1400, env_size: int=10):
         super(Policy, self).__init__()
         self.nb_actions = nb_requests * 2 + 1
-        self.nb_tokens = nb_requests + 1 + 1
-        #self.world_embedding = nn.Linear(8, d_model)
-        #self.request_embedding = nn.Linear(10, d_model)
-        #self.vehicle_embedding = nn.Linear(6, d_model)
+        self.nb_tokens = 8 + nb_requests * 10 + 6
+        self.nb_requests = nb_requests 
+        self.device = get_device()
+        self.time_end = time_end
+        self.env_size = env_size
+        self.to(self.device)
+        
+        #Transformers
         self.encoder =  nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead)
         self.encoders = nn.TransformerEncoder(self.encoder, num_layers=num_layers)
         self.classifier = nn.Linear(self.nb_tokens * d_model, self.nb_actions) 
-        self.device = get_device()
-        self.to(self.device)
 
-        # Request embeddings
-        self.embed_time = nn.Embedding(time_end, d_model) #for all window constraints
-        self.embed_position = nn.Embedding(env_size * 2 * 10, d_model)
+
+        #Request embeddings
+        self.embed_time = nn.Embedding(time_end * 10 + 1, d_model) 
+        self.embed_position = nn.Embedding(env_size * 2 * 10 + 1, d_model)
         self.embed_request_id = nn.Embedding(nb_requests + 1, d_model)
         self.embed_request_status = nn.Embedding(3, d_model)
 
-        # Vehicle embeddings 
+        #Vehicle embeddings 
         self.embed_vehicle_status = nn.Embedding(3, d_model)
         
         #World embeddings
         self.embed_current_vehicle = nn.Embedding(nb_vehicles, d_model)
 
     def embeddings(self, world, requests, vehicles):
-        x = [self.embed_time(world[0].long().to(device))]
-        self.embed_time(world[6].long().to(device))
-        self.embed_time(world[7].long().to(device))
-        x.append(self.embed_current_vehicle(world[1].long().to(device)))
-        x.append(self.embed_position(world[2].long().to(device)))
-        x.append(self.embed_position(world[3].long().to(device)))
-        x.append(self.embed_position(world[4].long().to(device)))
-        x.append(self.embed_position(world[5].long().to(device)))
-        world = np.array([self.current_time, 
-                    
-                    self.max_ride_time,
-                    self.max_route_duration])
+        world = torch.transpose(world, 0, 1) #world.size() = (8, bsz)
+        w = [self.embed_time(torch.round(10 * world[0]).long().to(self.device))]
+        w.append(self.embed_current_vehicle(world[1].long().to(self.device)))
+        w.append(self.embed_position(torch.round(world[2] * 10 + self.env_size * 10).long().to(self.device)))
+        w.append(self.embed_position(torch.round(world[3] * 10 + self.env_size * 10).long().to(self.device)))
+        w.append(self.embed_position(torch.round(world[4] * 10 + self.env_size * 10).long().to(self.device)))
+        w.append(self.embed_position(torch.round(world[5] * 10 + self.env_size * 10).long().to(self.device)))
+        w.append(self.embed_time(torch.round(10 * world[6]).long().to(self.device)))
+        w.append(self.embed_time(torch.round(10 * world[7]).long().to(self.device)))
+        w = torch.stack(w).transpose(0, 1) #w.size() = (bsz, 8, d_model)
+
+        r = []
+        #requests.size() = (bsz, nb_requests, 10)
+        for i in range(self.nb_requests):
+            r.append(self.embed_request_id(requests[:,i,0].long().to(self.device)))
+            r.append(self.embed_position(torch.round(requests[:,i,1] * 10 + self.env_size * 10).long().to(self.device)))
+            r.append(self.embed_position(torch.round(requests[:,i,2] * 10 + self.env_size * 10).long().to(self.device)))
+            r.append(self.embed_position(torch.round(requests[:,i,3] * 10 + self.env_size * 10).long().to(self.device)))
+            r.append(self.embed_position(torch.round(requests[:,i,4] * 10 + self.env_size * 10).long().to(self.device)))
+            r.append(self.embed_time(torch.round(requests[:,i,5] * 10).long().to(self.device)))
+            r.append(self.embed_time(torch.round(requests[:,i,6] * 10).long().to(self.device)))
+            r.append(self.embed_time(torch.round(requests[:,i,7] * 10).long().to(self.device)))
+            r.append(self.embed_time(torch.round(requests[:,i,8] * 10).long().to(self.device)))
+            r.append(self.embed_request_status(requests[:,i,9].long().to(self.device)))
+        r = torch.stack(r).transpose(0, 1) #r.size() = (bsz, 10 * nb_requests, d_model)
+       
+        vehicles = torch.transpose(vehicles, 0, 1) #vehicles.size() = (6, bsz)
+        v = []
+        v.append(self.embed_position(torch.round(vehicles[0] * 10 + self.env_size * 10).long().to(self.device)))
+        v.append(self.embed_position(torch.round(vehicles[1] * 10 + self.env_size * 10).long().to(self.device)))
+        v.append(self.embed_vehicle_status(vehicles[2].long().to(self.device)))
+        v.append(self.embed_request_id(vehicles[3].long().to(self.device)))
+        v.append(self.embed_request_id(vehicles[4].long().to(self.device)))
+        v.append(self.embed_request_id(vehicles[5].long().to(self.device)))
+        v = torch.stack(v).transpose(0, 1) #v.size() = (bsz, 6, d_model)
+
+        return w, r, v
+
     
 
     def forward(self, state):
         world, requests, vehicles = state 
-
         w, r, v = self.embeddings(world, requests, vehicles)
 
-        world = world.to(self.device) # world.size() (bsz, nb_tokens, embed)
-        requests = requests.to(self.device)
-        vehicles = vehicles.to(self.device)
-        #w = self.world_embedding(world)
-        #r = self.request_embedding(requests)
-        #v = self.vehicle_embedding(vehicles)
         
-        x = torch.cat((w, r, v), dim=1) # x.size() = (bsz, nb_tokens, embed)
-        x = x.permute([1,0,2]) # x.size() = (nb_tokens, bsz, embed)
+        x = torch.cat((w, r, v), dim=1) #x.size() = (bsz, nb_tokens, embed)
+        x = x.permute([1,0,2]) #x.size() = (nb_tokens, bsz, embed)
         x = self.encoders(x)
         x = x.permute([1,0,2]).flatten(start_dim=1)
         x = self.classifier(x)
-        return x
+        return x  #x.size() = (bsz, nb_actions)
     
     def act(self, state, mask):
         out = self.forward(state).cpu()
@@ -184,39 +206,39 @@ if __name__ == "__main__":
     device = get_device() 
     FILE_NAME = 'data/cordeau/a2-16.txt'    
     test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=200, dataset=FILE_NAME)
-    print([r for r in test_env.vehicles])
 
-    path = "data/test_sets/generated-a2-16.pkl"
-    envs = load_data(path)
+    # path = "data/test_sets/generated-a2-16.pkl"
+    # envs = load_data(path)
 
     policy = Policy(d_model=128, nhead=4, nb_requests=16)
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
 
-    logger = set_level(logger, "info")
+    # logger = set_level(logger, "info")
     
-    scores, tests = reinforce(policy=policy, 
-                     optimizer=optimizer,
-                     nb_epochs=10, 
-                     update_baseline=100,
-                     envs=envs,
-                     test_env=test_env,
-                     relax_window=False)
-    #dump_data(scores, "models/scores.pkl")
-    #dump_data(tests, "models/tests.pkl")
-    PATH = "models/test.pth"
-    torch.save(policy.state_dict(), PATH)
-    # fig, ax = plt.subplots(1,1,figsize=(10,10))
-    # ax.plot(scores)
-    # ax.set(xlabel="Epsidoe", ylabel="Training Reward", title="Total distance")
+    # scores, tests = reinforce(policy=policy, 
+    #                  optimizer=optimizer,
+    #                  nb_epochs=10, 
+    #                  update_baseline=100,
+    #                  envs=envs,
+    #                  test_env=test_env,
+    #                  relax_window=False)
+    # #dump_data(scores, "models/scores.pkl")
+    # #dump_data(tests, "models/tests.pkl")
+    # PATH = "models/test.pth"
+    # torch.save(policy.state_dict(), PATH)
+    # # fig, ax = plt.subplots(1,1,figsize=(10,10))
+    # # ax.plot(scores)
+    # # ax.set(xlabel="Epsidoe", ylabel="Training Reward", title="Total distance")
     
-    # plt.show()
+    # # plt.show()
 
-    #TEST ENV WITH LOGS
-    logger.info("FINAL TEST WITH LOGS")
-    logger = set_level(logger, "debug")
-    test_env.reset(relax_window=False)
-    rewards, _ = simulate(100, test_env, policy)
-    rewards = sum([r.state == "delivered" for r in test_env.requests])
-    logger.info(f"total delivered: {rewards}")
+    # #TEST ENV WITH LOGS
+    # logger.info("FINAL TEST WITH LOGS")
+    # logger = set_level(logger, "debug")
+    # test_env.reset(relax_window=False)
+    # rewards, _ = simulate(100, test_env, policy)
+    # rewards = sum([r.state == "delivered" for r in test_env.requests])
+    # logger.info(f"total delivered: {rewards}")
+
 
 

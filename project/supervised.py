@@ -12,12 +12,16 @@ from generator import dump_data, load_data
 
 def generate_supervised_dataset(max_step: int, envs: List[DarpEnv], test_size: float, batch_size: int) -> Tuple[DataLoader, DataLoader]:
     dataset = []
+    i = 0
     for env in envs:
         obs = env.reset()
         for _ in range(max_step):
+            i += 1
             action = env.nearest_action_choice()
             dataset.append([obs, action])
             obs, _, done = env.step(action)
+            if i > 100:
+                break
             if done:
                 break
 
@@ -127,7 +131,7 @@ def supervised_trainer(envs_path: str,
 
 
 if __name__ == "__main__":
-    envs_path = "data/processed/generated-10000-a2-16.pkl"
+    envs_path = "data/processed/generated-a2-16.pkl"
     result_path = "models"
     max_steps = 100
     test_size = 0.05
@@ -137,6 +141,7 @@ if __name__ == "__main__":
     id = "result-a2-16-supervised-nn-04"
 
     result = supervised_trainer(envs_path, result_path, max_steps, test_size, batch_size, policy, optimizer, id) 
+
 
 
     
