@@ -119,7 +119,7 @@ def simulate(max_step: int, env: DarpEnv, policy: Policy, greedy: bool=False) ->
     rewards = []
     log_probs = []
     world, requests, vehicle = env.representation()
-    state = [world.unsqueeze(0), requests.unsqueeze(0), vehicle.unsqueeze(0)]
+    state = [torch.tensor(world).unsqueeze(0), torch.tensor(requests).unsqueeze(0), torch.tensor(vehicle).unsqueeze(0)]
     for t in range(max_step):
         mask = env.mask_illegal()
         if sum(mask) == 0:
@@ -130,7 +130,7 @@ def simulate(max_step: int, env: DarpEnv, policy: Policy, greedy: bool=False) ->
             action, log_prob = policy.act(state, mask)
         state, reward, done = env.step(action)
         world, requests, vehicle  = state
-        state = [world.unsqueeze(0), requests.unsqueeze(0), vehicle.unsqueeze(0)]
+        state = [torch.tensor(world).unsqueeze(0), torch.tensor(requests).unsqueeze(0), torch.tensor(vehicle).unsqueeze(0)]
         rewards.append(reward)
         log_probs.append(log_prob)
         if done:
@@ -144,8 +144,7 @@ def reinforce(policy: Policy,
              max_step: int, 
              update_baseline: int,
              envs: List[DarpEnv],
-             test_env: DarpEnv,
-             relax_window: bool):
+             test_env: DarpEnv):
     #init baseline model
     baseline = copy.deepcopy(policy)
     baseline = baseline.to(device)
@@ -157,13 +156,14 @@ def reinforce(policy: Policy,
     for i_epoch in range(nb_epochs):
         logger.info("*** EPOCH %s ***", i_epoch)
         for i_episode, env in enumerate(envs):
+            print(i_episode)
             #update baseline model after every 500 steps
             if i_episode % update_baseline == 0:
                 if train_R >= baseline_R:
                     logger.info("new baseline model selected after achiving %s reward", train_R)
                     baseline.load_state_dict(policy.state_dict())
 
-            env.reset(relax_window)
+            env.reset()
             baseline_env = copy.deepcopy(env)
 
             #simulate episode with train and baseline policy
@@ -187,7 +187,7 @@ def reinforce(policy: Policy,
             torch.nn.utils.clip_grad_norm_(policy.parameters(), 1)
             optimizer.step()
             if i_episode % 100 == 0:
-                test_env.reset(relax_window)
+                test_env.reset()
                 with torch.no_grad():
                     rewards, log_probs = simulate(max_step, test_env, policy, greedy=True)
 
@@ -207,21 +207,21 @@ if __name__ == "__main__":
     FILE_NAME = 'data/cordeau/a2-16.txt'    
     test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=200, dataset=FILE_NAME)
 
-    # path = "data/test_sets/generated-a2-16.pkl"
-    # envs = load_data(path)
+    path = "data/processed/generated-a2-16.pkl"
+    envs = load_data(path)
 
     policy = Policy(d_model=128, nhead=4, nb_requests=16)
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
 
-    # logger = set_level(logger, "info")
+    logger = set_level(logger, "info")
     
-    # scores, tests = reinforce(policy=policy, 
-    #                  optimizer=optimizer,
-    #                  nb_epochs=10, 
-    #                  update_baseline=100,
-    #                  envs=envs,
-    #                  test_env=test_env,
-    #                  relax_window=False)
+    scores, tests = reinforce(policy=policy, 
+                      optimizer=optimizer,
+                      nb_epochs=10, 
+                      max_step = 100,
+                      update_baseline=100,
+                      envs=envs,
+                      test_env=test_env)
     # #dump_data(scores, "models/scores.pkl")
     # #dump_data(tests, "models/tests.pkl")
     # PATH = "models/test.pth"
