@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 from log import logger, set_level
 
 class Policy(nn.Module):
-    def __init__(self, d_model: int=512, nhead: int=8, nb_requests: int=16, nb_vehicles: int=2, num_layers: int=2, time_end: int=1400, env_size: int=10):
+    def __init__(self, d_model: int=512, nhead: int=8, nb_requests: int=16, nb_vehicles: int=2, num_layers: int=2, time_end: int=1440, env_size: int=10):
         super(Policy, self).__init__()
         self.nb_actions = nb_requests * 2 + 1
         self.nb_tokens = 8 + nb_requests * 10 + 6
@@ -30,7 +30,6 @@ class Policy(nn.Module):
         self.encoder =  nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead)
         self.encoders = nn.TransformerEncoder(self.encoder, num_layers=num_layers)
         self.classifier = nn.Linear(self.nb_tokens * d_model, self.nb_actions) 
-
 
         #Request embeddings
         self.embed_time = nn.Embedding(time_end * 10 + 1, d_model) 
@@ -65,7 +64,10 @@ class Policy(nn.Module):
             r.append(self.embed_position(torch.round(requests[:,i,3] * 10 + self.env_size * 10).long().to(self.device)))
             r.append(self.embed_position(torch.round(requests[:,i,4] * 10 + self.env_size * 10).long().to(self.device)))
             r.append(self.embed_time(torch.round(requests[:,i,5] * 10).long().to(self.device)))
-            r.append(self.embed_time(torch.round(requests[:,i,6] * 10).long().to(self.device)))
+            try:
+                r.append(self.embed_time(torch.round(requests[:,i,6] * 10).long().to(self.device)))
+            except:
+                print(requests[:,i,6])
             r.append(self.embed_time(torch.round(requests[:,i,7] * 10).long().to(self.device)))
             r.append(self.embed_time(torch.round(requests[:,i,8] * 10).long().to(self.device)))
             r.append(self.embed_request_status(requests[:,i,9].long().to(self.device)))
@@ -205,7 +207,7 @@ if __name__ == "__main__":
     seed_everything(1)
     device = get_device() 
     FILE_NAME = 'data/cordeau/a2-16.txt'    
-    test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1400, max_step=200, dataset=FILE_NAME)
+    test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=200, dataset=FILE_NAME)
 
     path = "data/processed/generated-a2-16.pkl"
     envs = load_data(path)

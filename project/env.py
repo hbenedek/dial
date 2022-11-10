@@ -66,10 +66,10 @@ class DarpEnv(gym.Env):
             logger.debug("relaxing window constraints for all Requests")
             for request in requests:
                 request.relax_window(self.time_end)
-        else:
-            logger.debug("tightening window constraints for all Requests")
-            for request in requests:
-                request.tight_window()
+        #else:
+        #    logger.debug("tightening window constraints for all Requests")
+        #    for request in requests:
+        #        request.tight_window()
         self.waiting_vehicles = [vehicle.id for vehicle in self.vehicles]
         self.current_vehicle = self.waiting_vehicles.pop()
         logger.debug("new current vehicle selected: %s", self.current_vehicle)
@@ -131,9 +131,9 @@ class DarpEnv(gym.Env):
         for vehicle in self.vehicles:
             if vehicle.state != "finished":
                 event = vehicle.get_distance_to_destination() 
-                # if vehicle choose to not move we still increase the time by epsilon
+                # if vehicle choose to not move we still increase the time one
                 if float_equality(event, 0):
-                    event = epsilon
+                    event = 1
                 events.append(self.current_time + event)
 
         events = [event for event in events if event > self.current_time]

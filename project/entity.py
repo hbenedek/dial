@@ -53,7 +53,7 @@ class Request():
 
     def tight_window(self):
         """make the time windows as tight as possible"""
-        service_time = self.get_service_time()
+        service_time = int(self.get_service_time() + 1)
         #earliest i can deliver
         self.end_window[0] = max(self.end_window[0], self.start_window[0] + service_time)
         #latest i can deliver
@@ -62,6 +62,7 @@ class Request():
         self.start_window[0] = max(self.start_window[0], self.end_window[0] - self.max_ride_time)
         #latest i can pickup (in order to arrive until end_window[1])
         self.start_window[1] = min(self.start_window[1], self.end_window[1] - service_time)
+        logger.debug("setting new window for: start: %s, end: %s, for %s", self.start_window, self.end_window, self)
 
     def relax_window(self, time_end: int):
         """drop all window constrains"""

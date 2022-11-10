@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 import re
 import sys
 from entity import Request, Vehicle
+from log import logger, set_level
 
 def tabu_scraper(path = "..data/tabu/"):
     """scrapes the benchmark dataset from Cordeau, Laporte 2003"""
@@ -78,6 +79,7 @@ def generate_instance(seed,
                             end_window=end_windows[i],
                             max_ride_time=max_ride_time)
             requests.append(request)
+            logger.debug("setting new window - start: %s, end: %s, for %s", request.start_window, request.end_window, request)
         return vehicles, requests, depots
 
 
@@ -128,7 +130,6 @@ def parse_data(datadir: str) -> Tuple[List[Vehicle], List[Request], List[np.ndar
                     request = requests[l - number_line // 2]
                     request.dropoff_position = np.array([dropoff_x, dropoff_y])
                     request.end_window = np.array([start_tw, end_tw])
-
         return vehicles, requests, depots
 
 def generate_window(nb_requests: int, time_end: int, max_ride_time: int) -> Tuple[List[np.ndarray], List[np.ndarray]]:
@@ -138,16 +139,16 @@ def generate_window(nb_requests: int, time_end: int, max_ride_time: int) -> Tupl
         end_windows = []
         for j in range(nb_requests):
             # Generate start and end point for window
-            start = np.random.randint(0, time_end * 0.9) 
+            start = np.random.randint(0, int(time_end * 0.9)) 
             end = np.random.randint(start + 15, start + 45)
             #free pickup condition
             if j < nb_requests // 2:
-                start_fork = [max(0, start - max_ride_time), end]
+                start_fork = [0, time_end]
                 end_fork = [start, end]
             #free dropoff condition
             else:
                 start_fork = [start, end]
-                end_fork = [start, min(time_end, end + max_ride_time)]
+                end_fork = [0, time_end]
 
             start_windows.append(np.array(start_fork))
             end_windows.append(np.array(end_fork))
@@ -184,17 +185,17 @@ def load_data(file: str):
 
 
 if __name__ == "__main__":
-        
-    envs = generate_training_data(N=10000,
+    logger = set_level(logger, "debug")
+    envs = generate_training_data(N=10,
                         size= 10, 
                         nb_vehicles=2,
                         nb_requests=16,
-                        time_end=1400,
+                        time_end=1440,
                         max_step=1000,
                         max_route_duration=480,
                         capacity=3,
                         max_ride_time=30,
                         window=True)
 
-    path = "data/test_sets/generated-10000-a2-16.pkl"
+    path = "data/test_sets/generated-10-a2-16.pkl"
     dump_data(envs, path)
