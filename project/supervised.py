@@ -13,7 +13,6 @@ from utils import get_device
 
 def generate_supervised_dataset(max_step: int, envs: List[DarpEnv], test_size: float, batch_size: int) -> Tuple[DataLoader, DataLoader]:
     dataset = []
-    i = 0
     for env in envs:
         obs = env.reset()
         for _ in range(max_step):
@@ -130,7 +129,7 @@ def supervised_trainer(envs_path: str,
 
 
 if __name__ == "__main__":
-    envs_path = "data/test_sets/generated-10000-a2-16.pkl"
+    envs_path = "data/test_sets/generated-10-a2-16.pkl"
     result_path = "models"
     max_steps = 1440 * 16
     test_size = 0.05
@@ -145,14 +144,14 @@ if __name__ == "__main__":
     logger.info("dataset successfully loaded")
 
     train_loader, test_loader = generate_supervised_dataset(max_step=max_steps, envs=envs, test_size=test_size, batch_size=batch_size)
-    #logger.info("train and test DataLoader objects successfully initialized")
-    #for i, data in enumerate(train_loader):
-    #    states, supervised_actions = data
-    #    world, requests, vehicles = states 
-    #  
-    #    out = policy(states)
-    #    logger.info("loaded %s", i)
-    result = supervised_trainer(envs_path, result_path, max_steps, test_size, batch_size, nb_epochs, policy, optimizer, id) 
+    logger.info("train and test DataLoader objects successfully initialized")
+    for i, data in enumerate(train_loader):
+        states, supervised_actions = data
+        world, requests, vehicles = states 
+      
+        out = policy(states)
+        logger.info("loaded %s", i)
+    #result = supervised_trainer(envs_path, result_path, max_steps, test_size, batch_size, nb_epochs, policy, optimizer, id) 
     
 
 

@@ -69,7 +69,7 @@ class DarpEnv(gym.Env):
         #else:
         #    logger.debug("tightening window constraints for all Requests")
         #    for request in requests:
-        #        request.tight_window()
+        #        request.tight_window(self.time_end)
         self.waiting_vehicles = [vehicle.id for vehicle in self.vehicles]
         self.current_vehicle = self.waiting_vehicles.pop()
         logger.debug("new current vehicle selected: %s", self.current_vehicle)

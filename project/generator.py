@@ -134,7 +134,7 @@ def parse_data(datadir: str) -> Tuple[List[Vehicle], List[Request], List[np.ndar
 
 def generate_window(nb_requests: int, time_end: int, max_ride_time: int) -> Tuple[List[np.ndarray], List[np.ndarray]]:
         #FIXME: this method does not seem very sophisticated, copied from Pawal's code
-        """Generate 50% of free dropof conditions, and 50% of free pickup time conditions time windows for Requests"""
+        """Generate 50% of free dropoff conditions, and 50% of free pickup time conditions time windows for Requests"""
         start_windows = []
         end_windows = []
         for j in range(nb_requests):

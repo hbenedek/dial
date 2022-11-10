@@ -36,11 +36,7 @@ class Policy(nn.Module):
         self.embed_position = nn.Embedding(env_size * 2 * 10 + 1, d_model)
         self.embed_request_id = nn.Embedding(nb_requests + 1, d_model)
         self.embed_request_status = nn.Embedding(3, d_model)
-
-        #Vehicle embeddings 
         self.embed_vehicle_status = nn.Embedding(3, d_model)
-        
-        #World embeddings
         self.embed_current_vehicle = nn.Embedding(nb_vehicles, d_model)
 
     def embeddings(self, world, requests, vehicles):
