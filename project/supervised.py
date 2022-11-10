@@ -28,6 +28,7 @@ def generate_supervised_dataset(max_step: int, envs: List[DarpEnv], test_size: f
     logger.info("Supervised test dataset generetad of size %s", len(test))
     train_loader = DataLoader(train, batch_size=batch_size)
     test_loader = DataLoader(test, batch_size=batch_size)
+    #TODO: save and dump loader objects
     return train_loader, test_loader
 
 
@@ -129,7 +130,7 @@ def supervised_trainer(envs_path: str,
 
 
 if __name__ == "__main__":
-    envs_path = "data/test_sets/generated-10-a2-16.pkl"
+    envs_path = "data/processed/generated-10000-a2-16.pkl"
     result_path = "models"
     max_steps = 1440 * 16
     test_size = 0.05
@@ -140,18 +141,18 @@ if __name__ == "__main__":
     policy = policy.to(device)
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4, weight_decay=1e-3)
     id = "result-a2-16-supervised-nn-05"
-    envs = load_data(envs_path)
-    logger.info("dataset successfully loaded")
+    #envs = load_data(envs_path)
+    #logger.info("dataset successfully loaded")
 
-    train_loader, test_loader = generate_supervised_dataset(max_step=max_steps, envs=envs, test_size=test_size, batch_size=batch_size)
-    logger.info("train and test DataLoader objects successfully initialized")
-    for i, data in enumerate(train_loader):
-        states, supervised_actions = data
-        world, requests, vehicles = states 
-      
-        out = policy(states)
-        logger.info("loaded %s", i)
-    #result = supervised_trainer(envs_path, result_path, max_steps, test_size, batch_size, nb_epochs, policy, optimizer, id) 
+    #train_loader, test_loader = generate_supervised_dataset(max_step=max_steps, envs=envs, test_size=test_size, batch_size=batch_size)
+    #logger.info("train and test DataLoader objects successfully initialized")
+    #for i, data in enumerate(train_loader):
+    #    states, supervised_actions = data
+    #    world, requests, vehicles = states 
+    #  
+    #    out = policy(states)
+    #    logger.info("loaded %s", i)
+    result = supervised_trainer(envs_path, result_path, max_steps, test_size, batch_size, nb_epochs, policy, optimizer, id) 
     
 
 

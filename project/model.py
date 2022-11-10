@@ -138,7 +138,8 @@ def reinforce(policy: Policy,
              max_step: int, 
              update_baseline: int,
              envs: List[DarpEnv],
-             test_env: DarpEnv):
+             test_env: DarpEnv,
+             relax_window: bool=True):
     #init baseline model
     baseline = copy.deepcopy(policy)
     baseline = baseline.to(device)
@@ -157,7 +158,7 @@ def reinforce(policy: Policy,
             #        logger.info("new baseline model selected after achiving %s reward", train_R)
             #        baseline.load_state_dict(policy.state_dict())
 
-            env.reset()
+            env.reset(relax_window)
             #baseline_env = copy.deepcopy(env)
 
             #simulate episode with train and baseline policy
@@ -180,7 +181,7 @@ def reinforce(policy: Policy,
             torch.nn.utils.clip_grad_norm_(policy.parameters(), 1)
             optimizer.step()
             if i_episode % 100 == 0:
-                test_env.reset()
+                test_env.reset(relax_window)
                 with torch.no_grad():
                     rewards, log_probs = simulate(max_step, test_env, policy, greedy=True)
 
@@ -191,10 +192,11 @@ def reinforce(policy: Policy,
                 in_trunk = sum([r.state == "in_trunk" for r in test_env.requests])
                 pickup = sum([r.state == "pickup" for r in test_env.requests])
                 logger.info(f'delivered: {delivered}, in trunk: {in_trunk}, waiting: {pickup}')
-            
+    #TODO: create result object
     return scores, tests
 
 def reinforce_trainer(envs_path: str):
+    #TODO: make similar function to supervised_trainer
     envs = load_data(path)
     pass
 
@@ -203,9 +205,9 @@ if __name__ == "__main__":
     seed_everything(1)
     device = get_device() 
     FILE_NAME = 'data/cordeau/a2-16.txt'    
-    test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=200, dataset=FILE_NAME)
+    test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=1440 * 16, dataset=FILE_NAME)
 
-    path = "data/processed/generated-a2-16.pkl"
+    path = "data/processed/generated-10000-a2-16.pkl"
     envs = load_data(path)
 
     policy = Policy(d_model=128, nhead=4, nb_requests=16)
@@ -216,7 +218,7 @@ if __name__ == "__main__":
     scores, tests = reinforce(policy=policy, 
                       optimizer=optimizer,
                       nb_epochs=10, 
-                      max_step = 100,
+                      max_step = 1440 * 16,
                       update_baseline=100,
                       envs=envs,
                       test_env=test_env)
