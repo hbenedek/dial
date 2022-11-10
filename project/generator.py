@@ -115,7 +115,7 @@ def parse_data(datadir: str) -> Tuple[List[Vehicle], List[Request], List[np.ndar
                 if l < number_line // 2:
                     identity, pickup_x, pickup_y, _, _, start_tw, end_tw = list(map(float, file.readline().split()))
 
-                    request = Request(id=identity,
+                    request = Request(id=int(identity),
                                 pickup_position=np.array([pickup_x, pickup_y]),
                                 dropoff_position=None,
                                 #represents the earliest and latest time, which the service may begin

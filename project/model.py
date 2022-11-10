@@ -60,10 +60,7 @@ class Policy(nn.Module):
             r.append(self.embed_position(torch.round(requests[:,i,3] * 10 + self.env_size * 10).long().to(self.device)))
             r.append(self.embed_position(torch.round(requests[:,i,4] * 10 + self.env_size * 10).long().to(self.device)))
             r.append(self.embed_time(torch.round(requests[:,i,5] * 10).long().to(self.device)))
-            try:
-                r.append(self.embed_time(torch.round(requests[:,i,6] * 10).long().to(self.device)))
-            except:
-                print(requests[:,i,6])
+            r.append(self.embed_time(torch.round(requests[:,i,6] * 10).long().to(self.device))) 
             r.append(self.embed_time(torch.round(requests[:,i,7] * 10).long().to(self.device)))
             r.append(self.embed_time(torch.round(requests[:,i,8] * 10).long().to(self.device)))
             r.append(self.embed_request_status(requests[:,i,9].long().to(self.device)))

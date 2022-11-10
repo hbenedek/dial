@@ -117,9 +117,15 @@ class DarpEnv(gym.Env):
 
 
     def take_action(self, action: int):
-        """ Action: destination point as an indice of the map vactor. (Ex: 1548 over 2500)"""
+        """the action is an id of a request or end depot"""
         current_vehicle = self.vehicles[self.current_vehicle]
-        current_vehicle.destination =  self.destination_dict[action]
+        #vehicle aims at end depot
+        if action == self.nb_requests:
+            current_vehicle.destination = self.end_depot
+        #vehicle aims at Request, depending on trunk it decides to pickup or dropoff
+        else:
+            target_request = self.requests[action]
+            current_vehicle.destination = current_vehicle.set_destination(target_request)
         self.already_assigned.append(action)
         logger.debug("choosing action %s (destination=%s) for %s", action, current_vehicle.destination, current_vehicle)
         current_vehicle.set_state("busy")
@@ -130,7 +136,7 @@ class DarpEnv(gym.Env):
         events = [self.current_time, self.time_end]
         for vehicle in self.vehicles:
             if vehicle.state != "finished":
-                event = vehicle.get_distance_to_destination() 
+                event = vehicle.get_distance_to_destination(self.current_time) 
                 # if vehicle choose to not move we still increase the time one
                 if float_equality(event, 0):
                     event = 1
@@ -142,7 +148,7 @@ class DarpEnv(gym.Env):
         self.current_time = new_time
         logger.debug("Time step updated to %s", self.current_time)
 
-    def update_vehicle_position(self):
+    def update_vehicle_position(self): #TODO: now we just update the position of 1 Vehicle (which triggered the time update...)
         """
         all vehicles are moved closer to their current destination
         pickups and dropoffs are resolved
@@ -151,7 +157,8 @@ class DarpEnv(gym.Env):
         self.update_needed = False
         for vehicle in self.vehicles:
             if vehicle.state != "finished":
-                dist_to_destination = vehicle.get_distance_to_destination()
+                dist_to_destination = vehicle.get_distance_to_destination(self.current_time)
+                logger.info(f"{vehicle} {dist_to_destination}")
                 if float_equality(self.last_time_gap, dist_to_destination, eps=0.001):
                     #vehicle arriving to destination
                     vehicle.move(vehicle.destination)
@@ -170,14 +177,14 @@ class DarpEnv(gym.Env):
                         if any([vehicle.state != "finished" for vehicle in self.vehicles]):
                             self.update_needed = True
 
-                #move vehicle closer to its destination
-                elif self.last_time_gap < dist_to_destination:
-                    unit_vector = (vehicle.destination - vehicle.position) / dist_to_destination
-                    new_position = vehicle.position + self.last_time_gap * unit_vector
-                    vehicle.move(new_position)
+                #move vehicle closer to its destination #FIXME: now we only update vehicle positions if the arrive
+                #elif self.last_time_gap < dist_to_destination:
+                #    unit_vector = (vehicle.destination - vehicle.position) / dist_to_destination
+                #    new_position = vehicle.position + self.last_time_gap * unit_vector
+                #    vehicle.move(new_position)
 
-                else:
-                    vehicle.set_state("waiting")
+                #else:
+                #    vehicle.set_state("waiting")
 
 
     def mask_illegal(self) -> torch.tensor:  
@@ -273,6 +280,7 @@ class DarpEnv(gym.Env):
         Given the current environment configuration, returns the closest possible destination for the current vehicle
         among potential pickups and dropoffs
         """
+        print("current vehicle: ", self.current_vehicle)
         vehicle = self.vehicles[self.current_vehicle]
         choice_id, choice_dist = None, np.inf #(request id, distance to target)
         for request in self.requests:
@@ -280,18 +288,22 @@ class DarpEnv(gym.Env):
             if vehicle.can_pickup(request, self.current_time, ignore_window=True):
                 if request.id not in self.already_assigned:
                     dist = distance(vehicle.position, request.pickup_position)
+                    #if start_window is not available vehicle needs to wait
+                    dist = dist + max(0, request.start_window[0] - self.current_time - dist) 
                     if choice_dist > dist:
                         choice_id, choice_dist = request.id, dist
 
             #potential Dropoff
             elif vehicle.can_dropoff(request, self.current_time, ignore_window=True):
                 dist = distance(vehicle.position, request.dropoff_position)
+                #if end_window is not available vehicle needs to wait
+                dist = dist + max(0, request.end_window[0] - self.current_time - dist) 
                 if choice_dist > dist:
-                    choice_id, choice_dist = request.id + self.nb_requests, dist
+                    choice_id, choice_dist = request.id, dist
     
         #goto end depot
         if choice_id is None:
-            choice_id = self.nb_requests * 2
+            choice_id = self.nb_requests
         return choice_id
 
     #self.embed_position = nn.Embedding(2 * self.size * 100, d_model)
@@ -327,17 +339,19 @@ if __name__ == "__main__":
     #env = DarpEnv(size=10, nb_requests=2, nb_vehicles=1, time_end=1400, max_step=100, dataset=FILE_NAME)
     obs = env.reset()
 
-    #simulate env with random action samples
+    #simulate env with nearest neighbor action
     rewards = []
     for t in range(1000):
         action = env.nearest_action_choice()
-        #action = env.action_space.sample()
+        delivered =  sum([request.state == "delivered" for request in env.requests])
+        in_trunk = sum([r.state == "in_trunk" for r in env.requests])
+        pickup = sum([r.state == "pickup" for r in env.requests])
+        logger.info(f'delivered: {delivered}, in trunk: {in_trunk}, waiting: {pickup}')
+        logger.info(f"Episode finished after {t + 1} steps, with reward {sum(rewards)}")
         obs, reward, done = env.step(action)
         rewards.append(reward)
         all_delivered = env.is_all_delivered()
         if done:
-            print(f"Episode finished after {t + 1} steps, with reward {sum(rewards)}, all requests delivered: {all_delivered}")
             break
-    delivered =  sum([request.state == "delivered" for request in env.requests])
-    if not done:
-        print(f"Episode finished after {t + 1} steps, with reward {rewards[-1]}, all requests delivered: {delivered}")
+
+    

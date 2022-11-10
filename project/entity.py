@@ -25,10 +25,10 @@ class Request():
         self.pickup_time: Optional[float] = None
 
     def __repr__(self):
-        return f"Vehicle_{self.id}_status_{self.state}"
+        return f"Request_{self.id}_status_{self.state}"
 
     def __str__(self):
-        return f"Vehicle_{self.id}_status_{self.state}"
+        return f"Request_{self.id}_status_{self.state}"
 
     def check_window(self, current_time: float, start: bool) -> bool:
         """
@@ -103,10 +103,11 @@ class Vehicle():
         self.max_route_duration = max_route_duration
         self.state: str = "waiting"
         self.statedict = {"waiting": 0, "busy": 1, "finished": 2}
-        self.trunk: List[Request] = []
+        self.trunk: List[Request] = [] #TODO: maybe just store the id? need to check if possible
         self.dist_to_destination: float = 0
         self.last_distance_travelled = 0
         self.total_distance_travelled = 0
+        self.target_request: Optional[Request] = None
         self.destination = np.empty(2)
 
     def __repr__(self):
@@ -115,8 +116,14 @@ class Vehicle():
     def __str__(self):
         return f"Vehicle_{self.id}_status_{self.state}"
 
-    def get_distance_to_destination(self) -> float:
-        return distance(self.position, self.destination)
+    def get_distance_to_destination(self, current_time: float) -> float:
+        dist = distance(self.position, self.destination)
+        if self.target_request:
+            if self.target_request.state == "pickup":
+                dist = dist + max(0, self.target_request.start_window[0] - dist - current_time)
+            if self.target_request.state == "dropoff":
+                dist = dist + max(0, self.target_request.end_window[0] - dist - current_time)
+        return dist
 
     def move(self, new_position: np.ndarray):
         """"set new position and save travelled distances"""
@@ -166,6 +173,14 @@ class Vehicle():
         logger.debug("setting new state: %s -> %s", self, state)
         self.state = state
 
+    def set_destination(self, request: Request) -> np.ndarray:
+        """given a Request depending on if it was picked up, the Vehicle """
+        self.target_request = request
+        if request in self.trunk:
+            return request.dropoff_position
+        else:
+            return request.pickup_position
+            
     def get_vector(self) -> List[int]:
         """returns the vector representation of the Vehicle"""
         vector = [self.position[0],
