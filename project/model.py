@@ -78,7 +78,6 @@ class Policy(nn.Module):
 
         return w, r, v
 
-    
 
     def forward(self, state):
         world, requests, vehicles = state 
@@ -135,8 +134,7 @@ def reinforce(policy: Policy,
              max_step: int, 
              update_baseline: int,
              envs: List[DarpEnv],
-             test_env: DarpEnv,
-             relax_window: bool=True):
+             test_env: DarpEnv):
     #init baseline model
     baseline = copy.deepcopy(policy)
     baseline = baseline.to(device)
@@ -155,7 +153,7 @@ def reinforce(policy: Policy,
             #        logger.info("new baseline model selected after achiving %s reward", train_R)
             #        baseline.load_state_dict(policy.state_dict())
 
-            env.reset(relax_window)
+            env.reset()
             #baseline_env = copy.deepcopy(env)
 
             #simulate episode with train and baseline policy
@@ -178,7 +176,7 @@ def reinforce(policy: Policy,
             torch.nn.utils.clip_grad_norm_(policy.parameters(), 1)
             optimizer.step()
             if i_episode % 100 == 0:
-                test_env.reset(relax_window)
+                test_env.reset()
                 with torch.no_grad():
                     rewards, log_probs = simulate(max_step, test_env, policy, greedy=True)
 
@@ -192,50 +190,42 @@ def reinforce(policy: Policy,
     #TODO: create result object
     return scores, tests
 
-def reinforce_trainer(envs_path: str):
-    #TODO: make similar function to supervised_trainer
-    envs = load_data(path)
-    pass
+
+def reinforce_trainer(train_envs_path: str, 
+                        test_env_path: str, 
+                        nb_epochs: int, 
+                        policy: Policy, 
+                        optimizer: torch.optim.Optimizer, 
+                        max_step: int):
+                        
+    train_envs = load_data(train_envs_path)
+    test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=1440 * 16, dataset=test_env_path)
+    logger.info("dataset successfully loaded")
+
+    logger.info("training starts")
+    result = reinforce(policy, optimizer, nb_epochs, max_step, update_baseline=100, envs=train_envs,test_env=test_env)
+    
+    return result
 
 
 if __name__ == "__main__":
     seed_everything(1)
-    device = get_device() 
-    FILE_NAME = 'data/cordeau/a2-16.txt'    
-    test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=1440 * 16, dataset=FILE_NAME)
+    train_envs_path = "data/processed/generated-10000-a2-16.pkl"
+    test_env_path = 'data/cordeau/a2-16.txt'  
+    result_path = "models"
+    max_steps = 1440 * 16
+    nb_epochs = 10
 
-    path = "data/processed/generated-10000-a2-16.pkl"
-    envs = load_data(path)
+    policy = Policy(d_model=128, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=2, time_end=1440, env_size=10)
+    device = get_device()
+    policy = policy.to(device)
 
-    policy = Policy(d_model=128, nhead=4, nb_requests=16)
-    optimizer = torch.optim.Adam(policy.parameters(), lr=1e-3)
+    optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4, weight_decay=1e-3)
 
     logger = set_level(logger, "info")
-    
-    scores, tests = reinforce(policy=policy, 
-                      optimizer=optimizer,
-                      nb_epochs=10, 
-                      max_step = 1440 * 16,
-                      update_baseline=100,
-                      envs=envs,
-                      test_env=test_env)
-    # #dump_data(scores, "models/scores.pkl")
-    # #dump_data(tests, "models/tests.pkl")
-    # PATH = "models/test.pth"
-    # torch.save(policy.state_dict(), PATH)
-    # # fig, ax = plt.subplots(1,1,figsize=(10,10))
-    # # ax.plot(scores)
-    # # ax.set(xlabel="Epsidoe", ylabel="Training Reward", title="Total distance")
-    
-    # # plt.show()
 
-    # #TEST ENV WITH LOGS
-    # logger.info("FINAL TEST WITH LOGS")
-    # logger = set_level(logger, "debug")
-    # test_env.reset(relax_window=False)
-    # rewards, _ = simulate(100, test_env, policy)
-    # rewards = sum([r.state == "delivered" for r in test_env.requests])
-    # logger.info(f"total delivered: {rewards}")
-
+    reinforce_trainer(train_envs_path, test_env_path, nb_epochs, policy, optimizer, max_steps)
+   
+    
 
 

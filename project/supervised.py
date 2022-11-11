@@ -68,7 +68,7 @@ def copycat_trainer(policy: Policy,
             total += supervised_actions.size(0)
             model_actions = torch.max(outputs, 1).indices
             correct += np.sum((model_actions == supervised_actions).cpu().numpy())
-            running_loss += loss.item()
+            running_loss += loss.item() #TODO: use mean loss instead of sum (to compare against test)
     
         acc = 100 * correct/ total
         train_losses.append(running_loss)
@@ -97,9 +97,9 @@ def copycat_trainer(policy: Policy,
 
     # save results in Result object
     result = Result(id)
-    result.train_loss = train_losses
-    result.test_loss = test_losses
-    result.accuracy= accuracies
+    result.train_loss = np.array(train_losses.cpu())
+    result.test_loss = np.array(test_losses.cpu())
+    result.accuracy= np.array(accuracies)
     result.policy_dict = policy.state_dict()
     return result
 
@@ -139,8 +139,8 @@ if __name__ == "__main__":
     device = get_device()
     policy = policy.to(device)
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4, weight_decay=1e-3)
-    id = "result-a2-16-supervised-nn-05"
-    #envs = load_data(envs_path)
+    #id = "result-a2-16-supervised-nn-05"
+    #v
     #logger.info("dataset successfully loaded")
 
     #train_loader, test_loader = generate_supervised_dataset(max_step=max_steps, envs=envs, test_size=test_size, batch_size=batch_size)
@@ -151,8 +151,7 @@ if __name__ == "__main__":
     #  
     #    out = policy(states)
     #    logger.info("loaded %s", i)
-    result = supervised_trainer(envs_path, result_path, max_steps, test_size, batch_size, nb_epochs, policy, optimizer, id) 
-    
+    #result = supervised_trainer(envs_path, result_path, max_steps, test_size, batch_size, nb_epochs, policy, optimizer, id) 
 
 
 
