@@ -103,7 +103,6 @@ def copycat_trainer(policy: Policy,
     result.policy_dict = policy.state_dict()
     return result
 
-
 def supervised_trainer(envs_path: str, 
                         result_path: str,
                         max_steps: int,

@@ -23,6 +23,7 @@ class Request():
         self.state = "pickup"
         self.statedict = {"pickup": 0, "in_trunk": 1, "delivered": 2}
         self.pickup_time: Optional[float] = None
+        self.dropoff_time: Optional[float] = None
 
     def __repr__(self):
         return f"Request_{self.id}_status_{self.state}"
@@ -53,9 +54,10 @@ class Request():
 
     def tight_window(self, time_end: int):
         """make the time windows as tight as possible"""
-
         filter = lambda x: min(max(0, x), time_end)
         service_time = int(self.get_service_time())
+        old_start = self.start_window.copy()
+        old_end = self.end_window.copy()
         #earliest i can deliver
         self.end_window[0] = filter(max(self.end_window[0], self.start_window[0] + service_time))
         #latest i can deliver
@@ -64,7 +66,7 @@ class Request():
         self.start_window[0] = filter(max(self.start_window[0], self.end_window[0] - self.max_ride_time))
         #latest i can pickup (in order to arrive until end_window[1])
         self.start_window[1] = filter(min(self.start_window[1], self.end_window[1] - service_time))
-        logger.debug("setting new window for: start: %s, end: %s, for %s", self.start_window, self.end_window, self)
+        logger.debug("setting new window for: start: %s -> %s, end: %s -> %s, for %s", old_start, self.start_window, old_end, self.end_window, self)
 
     def relax_window(self, time_end: int):
         """drop all window constrains"""
@@ -77,7 +79,6 @@ class Request():
         #latest i can pickup (in order to arrive until end_window[1])
         self.start_window[1] = time_end
         logger.debug("setting new window for: start: %s, end: %s, for %s", self.start_window, self.end_window, self)
-
 
     def get_vector(self) -> List[int]:
         """returns the vector representation of the Request"""
@@ -93,6 +94,15 @@ class Request():
         vector.append(self.statedict[self.state])
         return vector
 
+    def calculate_pickup_penalty(self):
+        return max(0, self.pickup_time - self.start_window[1])     
+
+    def calculate_dropoff_penalty(self):
+        return max(0, self.dropoff_time - self.end_window[1])
+
+    def calculate_ride_time_penalty(self):
+        return max(0, self.dropoff_time - self.pickup_time - self.max_ride_time)
+
 
 class Vehicle():
     """Class for representing Vehicles"""
@@ -107,6 +117,7 @@ class Vehicle():
         self.dist_to_destination: float = 0
         self.last_distance_travelled = 0
         self.total_distance_travelled = 0
+        self.frozen_until: float = 0.0
         self.target_request: Optional[Request] = None
         self.destination = np.empty(2)
 
@@ -116,13 +127,13 @@ class Vehicle():
     def __str__(self):
         return f"Vehicle_{self.id}_status_{self.state}"
 
-    def get_distance_to_destination(self, current_time: float) -> float:
+    def get_distance_to_destination(self) -> float:
         dist = distance(self.position, self.destination)
-        if self.target_request:
-            if self.target_request.state == "pickup":
-                dist = dist + max(0, self.target_request.start_window[0] - dist - current_time)
-            if self.target_request.state == "dropoff":
-                dist = dist + max(0, self.target_request.end_window[0] - dist - current_time)
+        #if self.target_request:
+        #    if self.target_request.state == "pickup":
+        #        dist = dist + max(0, self.target_request.start_window[0] - dist - current_time)
+        #    if self.target_request.state == "dropoff":
+        #        dist = dist + max(0, self.target_request.end_window[0] - dist - current_time)
         return dist
 
     def move(self, new_position: np.ndarray):
@@ -133,40 +144,31 @@ class Vehicle():
         self.position = new_position
         logger.debug("%s moved to position %s", self, self.position)
 
-    def can_pickup(self, request: Request, current_time: float, ignore_window: bool=True) -> bool:
-        dist = distance(self.position, request.pickup_position)
-        if ignore_window:
-            window = True
-        else:
-            request.check_window(current_time + dist, start=True)
-        return len(self.trunk) < self.capacity and window and request.state == "pickup"
+    def can_pickup(self, request: Request) -> bool:
+        return len(self.trunk) < self.capacity and request.state == "pickup"
 
     def pickup_request(self, request: Request, current_time: float):
         """given a time stamp and a request the Vehicle tries to load the request into its trunk"""
-        if self.can_pickup(request, current_time):
+        if self.can_pickup(request):
             self.trunk.append(request)
             logger.debug("%s picked up by %s", request, self)
             request.set_state("in_trunk")
             request.pickup_time = current_time
-        else:
-            logger.debug("ERROR: %s pickup DENIED for %s", request, self)
+        #else:
+        #    logger.debug("ERROR: %s pickup DENIED for %s", request, self)
 
-    def can_dropoff(self, request: Request, current_time: float, ignore_window: bool=True) -> bool:
-        dist = distance(self.position, request.dropoff_position)
-        if ignore_window:
-            window = True
-        else:
-            request.check_window(current_time + dist, start=False) 
-        return window and request in self.trunk
+    def can_dropoff(self, request: Request) -> bool:
+        return request in self.trunk
 
     def dropoff_request(self, request: Request, current_time: float):
         """given a time stamp and a request the Vehicle tries to unload the request from its trunk"""
-        if self.can_dropoff(request, current_time):
+        if self.can_dropoff(request):
             self.trunk.remove(request)
             logger.debug("%s dropped of by %s", request, self)
             request.set_state("delivered")
-        else:
-            logger.debug("ERROR: %s dropoff DENIED for %s", request, self)
+            request.dropoff_time = current_time
+        #else:
+        #    logger.debug("ERROR: %s dropoff DENIED for %s", request, self)
 
     def set_state(self, state: str):
         """state of the Vehicle is either waiting, busy or finished"""
@@ -189,6 +191,9 @@ class Vehicle():
         trunk =  [r.id for r in self.trunk]
         trunk = trunk + [0] * (self.capacity - len(self.trunk))
         return vector + trunk
+
+    def calculate_max_route_duration_penalty(self):
+       return max(0, self.total_distance_travelled - self.max_route_duration) 
 
 
 class Result():
