@@ -32,15 +32,16 @@ def branch_cut_scraper(path = "..data/cordeau/"):
         urllib.request.urlretrieve(url, path+filename+".txt")
 
 
-def generate_instance(seed,
-                    size, 
-                    nb_vehicles, 
-                    nb_requests, 
-                    time_end, 
-                    capacity, 
-                    max_route_duration, 
-                    max_ride_time,
-                    window=None) -> Tuple[List[Vehicle], List[Request], List[np.ndarray]]:
+def generate_instance(seed: int,
+                    size: int, 
+                    nb_vehicles: int, 
+                    nb_requests: int, 
+                    time_end: int, 
+                    capacity: int, 
+                    max_route_duration: int, 
+                    max_ride_time: int,
+                    window=None,
+                    random_depot=False) -> Tuple[List[Vehicle], List[Request], List[np.ndarray]]:
         """"generates random pickup, dropoff and other constraints, a list parsed of Vehicle and Request objects"""
         if seed:
             np.random.seed(seed)
@@ -48,9 +49,14 @@ def generate_instance(seed,
         target_pickup_coodrs = np.random.uniform(-size, size, (nb_requests, 2))
         target_dropoff_coords = np.random.uniform(-size, size, (nb_requests, 2))
 
-        #generate depot coordinates
-        start_depot = np.random.uniform(-size, size, 2)
-        end_depot = np.random.uniform(-size, size, 2)
+        #generate depot coordinates 
+        if random_depot:
+            start_depot = np.random.uniform(-size, size, 2)
+            end_depot = np.random.uniform(-size, size, 2)
+        else:
+            start_depot = np.array([0,0])
+            end_depot = np.array([0,0])
+
         depots = [start_depot, end_depot]
 
         #generate time window constraints
@@ -74,6 +80,7 @@ def generate_instance(seed,
             request = Request(id=i + 1,
                             pickup_position=target_pickup_coodrs[i],
                             dropoff_position=target_dropoff_coords[i],
+                            service_time = 3,
                             #represents the earliest and latest time, which the service may begin
                             start_window=start_windows[i],
                             end_window=end_windows[i],
@@ -113,11 +120,12 @@ def parse_data(datadir: str) -> Tuple[List[Vehicle], List[Request], List[np.ndar
             for l in range(number_line):
                 #parsing line 1, ...,n
                 if l < number_line // 2:
-                    identity, pickup_x, pickup_y, _, _, start_tw, end_tw = list(map(float, file.readline().split()))
+                    identity, pickup_x, pickup_y, service_time, _, start_tw, end_tw = list(map(float, file.readline().split()))
 
                     request = Request(id=int(identity),
                                 pickup_position=np.array([pickup_x, pickup_y]),
                                 dropoff_position=None,
+                                service_time = service_time,
                                 #represents the earliest and latest time, which the service may begin
                                 start_window=np.array([start_tw, end_tw]),
                                 end_window=None,
@@ -133,20 +141,25 @@ def parse_data(datadir: str) -> Tuple[List[Vehicle], List[Request], List[np.ndar
         return vehicles, requests, depots
 
 def generate_window(nb_requests: int, time_end: int, max_ride_time: int) -> Tuple[List[np.ndarray], List[np.ndarray]]:
-        #FIXME: this method does not seem very sophisticated, copied from Pawal's code
-        """Generate 50% of free dropoff conditions, and 50% of free pickup time conditions time windows for Requests"""
+        """
+        Generate 50% of free dropoff conditions, and 50% of free pickup time conditions time windows for Requests
+        according to Cordeau's rules
+        """
         start_windows = []
         end_windows = []
         for j in range(nb_requests):
-            # Generate start and end point for window
-            start = np.random.randint(0, int(time_end * 0.9)) 
-            end = np.random.randint(start + 15, start + 45)
-            #free pickup condition
+            #free pickup condition (outbound)
             if j < nb_requests // 2:
+                end = np.random.randint(0, time_end - 60)
+                start = end - 15 
+
                 start_fork = [0, time_end]
                 end_fork = [start, end]
-            #free dropoff condition
+            #free dropoff condition (inbound)
             else:
+                start = np.random.randint(60, time_end)
+                end = start + 15 
+
                 start_fork = [start, end]
                 end_fork = [0, time_end]
 
@@ -169,7 +182,9 @@ def generate_training_data(
     """returns a list of populated DarpEnv instances"""
     envs = []  
     from env import DarpEnv  
-    for _ in range(N):
+    for i in range(N):
+        if i % 100 == 0:
+            logger.info("%s environments generated", i)
         env = DarpEnv(size, nb_requests, nb_vehicles, time_end, max_step, max_route_duration, capacity, max_ride_time, window=window)
         envs.append(env)
     return envs
@@ -185,8 +200,8 @@ def load_data(file: str):
 
 
 if __name__ == "__main__":
-    logger = set_level(logger, "debug")
-    envs = generate_training_data(N=10,
+    logger = set_level(logger, "info")
+    envs = generate_training_data(N=10000,
                         size= 10, 
                         nb_vehicles=2,
                         nb_requests=16,
@@ -197,5 +212,8 @@ if __name__ == "__main__":
                         max_ride_time=30,
                         window=True)
 
+    
+    logger.info("data dump starts...")
     path = "data/test_sets/generated-10-a2-16.pkl"
     dump_data(envs, path)
+    logger.info("data successfully dumped")

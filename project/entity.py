@@ -11,19 +11,22 @@ class Request():
     def __init__(self, id: int,
                 pickup_position: np.ndarray,
                 dropoff_position: Optional[np.ndarray],
+                service_time: int,
                 start_window: np.ndarray,
                 end_window: Optional[np.ndarray],
                 max_ride_time: int):
         self.id = id - 1
         self.pickup_position = pickup_position
         self.dropoff_position = dropoff_position
+        self.service_time = service_time
         self.start_window = start_window
         self.end_window = end_window
         self.max_ride_time = max_ride_time
         self.state = "pickup"
         self.statedict = {"pickup": 0, "in_trunk": 1, "delivered": 2}
-        self.pickup_time: Optional[float] = None
-        self.dropoff_time: Optional[float] = None
+        self.pickup_time: float = 10000
+        self.dropoff_time: float = 10000
+        self.being_served: int = 0
 
     def __repr__(self):
         return f"Request_{self.id}_status_{self.state}"
@@ -92,6 +95,7 @@ class Request():
         vector.append(self.end_window[0])
         vector.append(self.end_window[1])
         vector.append(self.statedict[self.state])
+        vector.append(self.being_served + 1)
         return vector
 
     def calculate_pickup_penalty(self):
@@ -113,7 +117,7 @@ class Vehicle():
         self.max_route_duration = max_route_duration
         self.state: str = "waiting"
         self.statedict = {"waiting": 0, "busy": 1, "finished": 2}
-        self.trunk: List[Request] = [] #TODO: maybe just store the id? need to check if possible
+        self.trunk: List[Request] = [] 
         self.dist_to_destination: float = 0
         self.last_distance_travelled = 0
         self.total_distance_travelled = 0
@@ -139,7 +143,6 @@ class Vehicle():
     def move(self, new_position: np.ndarray):
         """"set new position and save travelled distances"""
         distance_travelled = distance(self.position, new_position)
-        self.last_distance_travelled = distance_travelled
         self.total_distance_travelled += distance_travelled
         self.position = new_position
         logger.debug("%s moved to position %s", self, self.position)
@@ -153,6 +156,7 @@ class Vehicle():
             self.trunk.append(request)
             logger.debug("%s picked up by %s", request, self)
             request.set_state("in_trunk")
+            request.being_served = self.id
             request.pickup_time = current_time
         #else:
         #    logger.debug("ERROR: %s pickup DENIED for %s", request, self)

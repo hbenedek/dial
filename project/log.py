@@ -1,6 +1,6 @@
 import logging
 
-def init_logger(log_path: str="logs", file_name: str="a2-16-nn-logs", level: str = "info") -> logging.Logger:
+def init_logger(log_path: str="logs", file_name: str="a2-16-reinforce-logs", level: str = "info") -> logging.Logger:
     log_formatter = logging.Formatter("%(asctime)s [%(levelname)-5.5s]  %(message)s")
     logger = logging.getLogger()
 

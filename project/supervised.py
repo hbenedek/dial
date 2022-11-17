@@ -1,4 +1,4 @@
-from model import Policy
+from model import Policy, Aoyu
 import torch
 from typing import List, Tuple, Optional
 from env import DarpEnv
@@ -68,11 +68,11 @@ def copycat_trainer(policy: Policy,
             total += supervised_actions.size(0)
             model_actions = torch.max(outputs, 1).indices
             correct += np.sum((model_actions == supervised_actions).cpu().numpy())
-            running_loss += loss.item() #TODO: use mean loss instead of sum (to compare against test)
+            running_loss += loss.item() 
     
         acc = 100 * correct/ total
-        train_losses.append(running_loss)
-        logger.info("EPOCH %s: train_loss: %s train_acc: %s", epoch, round(running_loss, 4), round(acc, 4))
+        train_losses.append(running_loss / (i + 1))
+        logger.info("EPOCH %s: train_loss: %s train_acc: %s", epoch, round(running_loss / (i + 1), 4), round(acc, 4))
 
         #test phase
         policy.eval()
@@ -84,23 +84,25 @@ def copycat_trainer(policy: Policy,
             supervised_actions = supervised_actions.to(policy.device)
             with torch.no_grad():
                 outputs= policy(states)
-
             loss = criterion(outputs, supervised_actions)
             total += supervised_actions.size(0)
             model_actions = torch.max(outputs, 1).indices
             correct += np.sum((model_actions == supervised_actions).cpu().numpy())
             running_loss += loss.item()
         acc = 100 * correct/ total
-        test_losses.append(running_loss)
+        test_losses.append(running_loss / (i + 1))
         accuracies.append(acc)
-        logger.info("EPOCH %s: test_loss: %s test_acc: %s", epoch, round(running_loss, 4), round(acc, 4))
+        logger.info("EPOCH %s: test_loss: %s test_acc: %s", epoch, round(running_loss / (i + 1), 4), round(acc, 4))
 
     # save results in Result object
+    policy = policy.to("cpu")
+    state_dict = policy.state_dict()
+
     result = Result(id)
-    result.train_loss = np.array(train_losses.cpu())
-    result.test_loss = np.array(test_losses.cpu())
-    result.accuracy= np.array(accuracies)
-    result.policy_dict = policy.state_dict()
+    result.train_loss = train_losses
+    result.test_loss = test_losses
+    result.accuracy= accuracies
+    result.policy_dict = state_dict
     return result
 
 def supervised_trainer(envs_path: str, 
@@ -123,35 +125,31 @@ def supervised_trainer(envs_path: str,
     result = copycat_trainer(policy=policy, optimizer=optimizer, nb_epochs=nb_epochs, train_loader=train_loader, test_loader=test_loader, id=id)
 
     logger.info("saving Result object...")
+    torch.save(policy.state_dict(), result_path + '/' + id + "-model")
     dump_data(result, result_path + '/' + id)
     logger.info("saving done")
     return result
 
 
 if __name__ == "__main__":
-    envs_path = "data/processed/generated-10000-a2-16.pkl"
+    envs_path = "data/test_sets/generated-10000-a2-16.pkl"
     result_path = "models"
     max_steps = 1440 * 16
     test_size = 0.05
-    batch_size = 128
-    nb_epochs = 10
-    policy = Policy(d_model=128, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=2, time_end=1440, env_size=10)
+    batch_size = 64
+    nb_epochs = 5
+    policy = Aoyu(d_model=128, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
     device = get_device()
+    PATH = "models/result-a2-16-supervised-nn-08-aoyu-model"
+    state = torch.load(PATH)
+    policy.load_state_dict(state)
+    logger.info("training on device: %s", device)
     policy = policy.to(device)
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4, weight_decay=1e-3)
-    #id = "result-a2-16-supervised-nn-05"
-    #v
-    #logger.info("dataset successfully loaded")
-
-    #train_loader, test_loader = generate_supervised_dataset(max_step=max_steps, envs=envs, test_size=test_size, batch_size=batch_size)
-    #logger.info("train and test DataLoader objects successfully initialized")
-    #for i, data in enumerate(train_loader):
-    #    states, supervised_actions = data
-    #    world, requests, vehicles = states 
-    #  
-    #    out = policy(states)
-    #    logger.info("loaded %s", i)
-    #result = supervised_trainer(envs_path, result_path, max_steps, test_size, batch_size, nb_epochs, policy, optimizer, id) 
+    id = "result-a2-16-supervised-nn-08-aoyu"
+   
+    result = supervised_trainer(envs_path, result_path, max_steps, test_size, batch_size, nb_epochs, policy, optimizer, id) 
+   
 
 
 
