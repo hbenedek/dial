@@ -33,12 +33,6 @@ class DarpEnv(gym.Env):
         self.time_end = time_end
         self.seed = seed
         self.datadir = dataset
-        # we probably don't need gym, but let's keep it here.. maybe for visualization purposes...
-        self.action_space = gym.spaces.Discrete(nb_requests * 2 + 1)
-        self.observation_space = gym.spaces.Box(low=-self.size,
-                                                high=self.size,
-                                                shape=(self.size + 1, self.size + 1),
-                                                dtype=np.int16)
         self.current_episode = 0
         self.penalty = 0
         self.window = window
@@ -46,23 +40,31 @@ class DarpEnv(gym.Env):
         if max_route_duration:
             self.max_route_duration = max_route_duration
         else:
-             self.max_route_duration = self.max_step
+             self.max_route_duration = min(self.max_step, self.time_end)
         if max_ride_time:
             self.max_ride_time = max_ride_time
         else:
-            self.max_ride_time = self.max_step
+            self.max_ride_time = min(self.max_step, self.time_end)
 
         self.start_depot = np.empty(2)
         self.end_depot = np.empty(2)
         self.reset()
 
-    def reset(self, relax_window: bool=False):
+
+
+    def reset(self, relax_window: bool=False, entities=None):
         """restarts/initializes the environment"""
         logger.debug("populate env instance with %s Vehicle and %s Request objects", self.nb_vehicles, self.nb_requests)
-        vehicles, requests, depots = self.populate_instance()
-        self.vehicles = vehicles
-        self.requests = requests
-        self.start_depot, self.end_depot = depots
+        if entities:
+            vehicles, requests, depots = entities
+            self.vehicles = vehicles
+            self.requests = requests
+            self.start_depot, self.end_depot = depots
+        else:
+            vehicles, requests, depots = self.populate_instance()
+            self.vehicles = vehicles
+            self.requests = requests
+            self.start_depot, self.end_depot = depots
         if relax_window:
             logger.debug("relaxing window constraints for all Requests")
             for request in requests:
@@ -70,7 +72,7 @@ class DarpEnv(gym.Env):
         else:
             logger.debug("tightening window constraints for all Requests")
             for request in requests:
-                request.tight_window(self.time_end)
+                request.tight_window(self.time_end, self.nb_requests)
         self.waiting_vehicles = [vehicle.id for vehicle in self.vehicles]
         self.current_vehicle = self.waiting_vehicles.pop()
         logger.debug("new current vehicle selected: %s", self.current_vehicle)
@@ -122,6 +124,7 @@ class DarpEnv(gym.Env):
             current_vehicle.destination = current_vehicle.set_destination(target_request)
             self.available_actions[action] = 0
         logger.debug("choosing action %s (destination=%s) for %s", action, current_vehicle.destination, current_vehicle)
+        current_vehicle.history.append(action)
         current_vehicle.set_state("busy")
 
     def update_time_step(self, epsilon=0.1) -> Vehicle: #TODO: check this sometinhg is not working
@@ -180,11 +183,14 @@ class DarpEnv(gym.Env):
                 elif vehicle.state is "busy":
                     vehicle.set_state("frozen")
                     vehicle.frozen_until = request.end_window[0] + request.service_time
-                       
+        
         elif distance(self.end_depot, vehicle.position) < 0.01:
             vehicle.set_state("finished")
+            self.update_needed = True
     
-        if any([vehicle.state in ["busy", "frozen"] for vehicle in self.vehicles]):
+        if all([vehicle.state is "finished" for vehicle in self.vehicles]):
+            self.update_needed = False
+        elif all([vehicle.state in ["busy", "frozen", "finished"] for vehicle in self.vehicles]):
             if not self.current_time == self.time_end:
                 self.update_needed = True
                    
@@ -193,12 +199,15 @@ class DarpEnv(gym.Env):
         current_vehicle = self.vehicles[self.current_vehicle]
         mask = np.zeros(self.nb_requests + 1)
         #if request in trunk that action should be available
-        for r in current_vehicle.trunk:
-            mask[r.id] = 1
-        #if trunk is empty, end depot is available 
         if len(current_vehicle.trunk) == 0:
             mask[-1] = 1
-        if distance(self.end_depot, current_vehicle.position) < 0.01:
+        for r in current_vehicle.trunk:
+            mask[r.id] = 1
+        if len(current_vehicle.trunk) == current_vehicle.capacity:
+            return torch.tensor(mask)
+        #if trunk is empty, end depot is available 
+        #if one vehicle left, it shoud deliver all remaining requests
+        if sum([v.state == "finished" for v in self.vehicles]) == (self.nb_vehicles - 1) and sum([r.state == "delivered" for r in self.requests]) < self.nb_requests:
             mask[-1] = 0
         return torch.tensor(mask + self.available_actions)
 
@@ -272,10 +281,10 @@ class DarpEnv(gym.Env):
 
     def penalize_broken_time_windows(self) -> Dict[str, float]:
         """checks if start, end time windows are satisfied, if not penalise linearly"""
-        start = [r.calculate_pickup_penalty() for r in self.requests]
-        end = [r.calculate_dropoff_penalty() for r in self.requests]
-        max_ride_time = [r.calculate_ride_time_penalty() for r in self.requests] 
-        max_route_duration = [v.calculate_max_route_duration_penalty() for v in self.vehicles]
+        start = [round(r.calculate_pickup_penalty(), 2) for r in self.requests]
+        end = [round(r.calculate_dropoff_penalty(), 2) for r in self.requests]
+        max_ride_time = [round(r.calculate_ride_time_penalty(), 2) for r in self.requests] 
+        max_route_duration = [round(v.calculate_max_route_duration_penalty(), 2) for v in self.vehicles]
         self.penalty = {"start_window": start, 
                         "end_window": end,
                         "max_route_duration": max_route_duration,
@@ -345,10 +354,11 @@ if __name__ == "__main__":
 
     #simulate env with nearest neighbor action
     rewards = []
-    for t in range(1000):
+    for t in range(100):
         action = env.nearest_action_choice()    
         obs, reward, done = env.step(action)
         rewards.append(reward)
+        delivered =  sum([request.state == "delivered" for request in env.requests])
         all_delivered = env.is_all_delivered()
         if done:
             break
@@ -356,9 +366,12 @@ if __name__ == "__main__":
 
     total = sum([v.total_distance_travelled for v in env.vehicles])
     logger.info(f"Episode finished after {t + 1} steps, with reward {total}")
+    for vehicle in env.vehicles:
+        logger.info(f'{vehicle} history: {vehicle.history}')
     delivered =  sum([request.state == "delivered" for request in env.requests])
     in_trunk = sum([r.state == "in_trunk" for r in env.requests])
     pickup = sum([r.state == "pickup" for r in env.requests])
+    logger.info(f'delivered: {delivered}, in trunk: {in_trunk}, waiting: {pickup}')
     logger.info(f'delivered: {delivered}, in trunk: {in_trunk}, waiting: {pickup}')
     logger.info("*** PENALTY ***")
     logger.info("start_window: %s", env.penalty["start_window"])

@@ -1,7 +1,7 @@
 import logging
 
-def init_logger(log_path: str="logs", file_name: str="a2-16-reinforce-logs", level: str = "info") -> logging.Logger:
-    log_formatter = logging.Formatter("%(asctime)s [%(levelname)-5.5s]  %(message)s")
+def init_logger(log_path: str="logs", file_name: str="a2-16-evaluate-ayou", level: str = "info") -> logging.Logger:
+    log_formatter = logging.Formatter("[%(asctime)s] [%(levelname)5s] [%(filename)s:%(lineno)s - %(funcName)s()]: %(message)s" )
     logger = logging.getLogger()
 
     file_handler = logging.FileHandler("{0}/{1}.log".format(log_path, file_name))

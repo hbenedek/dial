@@ -5,9 +5,12 @@ import requests
 import numpy as np
 from bs4 import BeautifulSoup
 import re
-import sys
 from entity import Request, Vehicle
+from collections import deque
 from log import logger, set_level
+import json
+import glob
+
 
 def tabu_scraper(path = "..data/tabu/"):
     """scrapes the benchmark dataset from Cordeau, Laporte 2003"""
@@ -40,7 +43,7 @@ def generate_instance(seed: int,
                     capacity: int, 
                     max_route_duration: int, 
                     max_ride_time: int,
-                    window=None,
+                    window=True,
                     random_depot=False) -> Tuple[List[Vehicle], List[Request], List[np.ndarray]]:
         """"generates random pickup, dropoff and other constraints, a list parsed of Vehicle and Request objects"""
         if seed:
@@ -86,7 +89,7 @@ def generate_instance(seed: int,
                             end_window=end_windows[i],
                             max_ride_time=max_ride_time)
             requests.append(request)
-            logger.debug("setting new window - start: %s, end: %s, for %s", request.start_window, request.end_window, request)
+            #logger.debug("setting new window - start: %s, end: %s, for %s", request.start_window, request.end_window, request)
         return vehicles, requests, depots
 
 
@@ -167,27 +170,6 @@ def generate_window(nb_requests: int, time_end: int, max_ride_time: int) -> Tupl
             end_windows.append(np.array(end_fork))
         return start_windows, end_windows
 
-def generate_training_data(
-                        N: int, #number of instances to generate
-                        size: int, 
-                        nb_vehicles: int,
-                        nb_requests: int,
-                        time_end: int,
-                        max_step: int,
-                        max_route_duration: int,
-                        capacity: int,
-                        max_ride_time: int,
-                        window: bool
-                        ): 
-    """returns a list of populated DarpEnv instances"""
-    envs = []  
-    from env import DarpEnv  
-    for i in range(N):
-        if i % 100 == 0:
-            logger.info("%s environments generated", i)
-        env = DarpEnv(size, nb_requests, nb_vehicles, time_end, max_step, max_route_duration, capacity, max_ride_time, window=window)
-        envs.append(env)
-    return envs
 
 def dump_data(object, file: str):
     with open(file, 'wb') as handle:
@@ -199,21 +181,151 @@ def load_data(file: str):
         return pickle.load(handle)
 
 
+def generate_environments(
+                        N: int, #number of instances to generate
+                        size: int, 
+                        nb_vehicles: int,
+                        nb_requests: int,
+                        time_end: int,
+                        max_step: int,
+                        max_route_duration: int,
+                        capacity: int,
+                        max_ride_time: int,
+                        window: bool): 
+    """returns a list of populated DarpEnv instances"""
+    envs = []  
+    from env import DarpEnv  
+    for i in range(N):
+        if i % 100 == 0:
+            logger.info("%s environments generated", i)
+        env = DarpEnv(size, nb_requests, nb_vehicles, time_end, max_step, max_route_duration, capacity, max_ride_time, window=window)
+        envs.append(env)
+    return envs
+
+###################################    PARSER AND LOADER FOR AOYU'S DATASET    ##########################################
+
+def parse_aoyu(datadir: str):
+    envs = []
+    with open(datadir, 'r') as file:
+        for pair in file:
+            pair = json.loads(pair)
+            nb_vehicles = pair['instance'][0][0]
+            nb_requests = pair['instance'][0][1]
+            max_route_duration = pair['instance'][0][2]
+            capacity = pair['instance'][0][3]
+            max_ride_time = pair['instance'][0][4]
+            objective = pair['objective']
+
+            requests = []
+            for i in range(0, 2* (nb_requests + 1)):
+                node = pair['instance'][i + 1]
+                if i == 0:
+                    start_depot = np.array([float(node[1]), float(node[2])])
+                    continue
+                elif i == 2 * (nb_requests + 1) - 1:
+                    end_depot = np.array([float(node[1]), float(node[2])])
+                    continue
+                elif i <= nb_requests:
+                    request = Request(id=int(i),
+                                    pickup_position=np.array([float(node[1]), float(node[2])]),
+                                    dropoff_position=None,
+                                    service_time =  node[3],
+                                    #represents the earliest and latest time, which the service may begin
+                                    start_window=np.array([float(node[5]), float(node[6])]),
+                                    end_window=None,
+                                    max_ride_time=max_ride_time)
+                    requests.append(request)
+                else:
+                    # Drop-off nodes
+                    request = requests[i - nb_requests - 1]
+                    request.dropoff_position = np.array([float(node[1]), float(node[2])])
+                    request.end_window = np.array([float(node[5]), float(node[6])])    
+
+                
+            #init Driver and Target instances
+            vehicles = []
+            length = len(pair['routes'])
+            for i in range(0,nb_vehicles):
+                vehicle = Vehicle(id=i,
+                            position=start_depot,
+                            capacity=capacity,
+                            max_route_duration=max_route_duration)
+                if length > i:
+                    vehicle.routes = deque(pair['routes'][i] + [nb_requests * 2 + 1])
+                    vehicle.schedule = pair['schedule'][i]
+                else:
+                    vehicle.routes = deque([nb_requests * 2 + 1])
+                    vehicle.schedule = []
+                vehicles.append(vehicle)
+
+            depots = [start_depot, end_depot]
+            from env import DarpEnv 
+            env = DarpEnv(10, nb_requests, nb_vehicles, 1440, 2 * nb_requests + nb_vehicles, max_route_duration, capacity, max_ride_time)
+            env.objective = objective
+            env.reset(entities=[vehicles, requests, depots])        
+            envs.append(env)
+        return envs
+
+
+def load_aoyo(instance: str):
+    train_path, test_path = f"data/aoyu/{instance}-train.txt", f"data/aoyu/{instance}-test.txt"
+    logger.info("parsing %s for training data", train_path)
+    train_envs = parse_aoyu(train_path)
+    logger.info("parsing %s for testing data", test_path)
+    test_envs = parse_aoyu(test_path)
+    return train_envs, test_envs
+
+
 if __name__ == "__main__":
     logger = set_level(logger, "info")
-    envs = generate_training_data(N=10000,
-                        size= 10, 
-                        nb_vehicles=2,
-                        nb_requests=16,
-                        time_end=1440,
-                        max_step=1000,
-                        max_route_duration=480,
-                        capacity=3,
-                        max_ride_time=30,
-                        window=True)
+    #envs = generate_training_data(N=10000,
+    #                    size= 10, 
+    #                    nb_vehicles=2,
+    #                    nb_requests=16,
+    #                    time_end=1440,
+    #                    max_step=1000,
+    #                    max_route_duration=480,
+    #                    capacity=3,
+    #                    max_ride_time=30,
+    #                    window=True)
 
     
-    logger.info("data dump starts...")
-    path = "data/test_sets/generated-10-a2-16.pkl"
-    dump_data(envs, path)
-    logger.info("data successfully dumped")
+    #logger.info("data dump starts...")
+    #path = "data/processed/generated-10000-a2-16.pkl"
+    #dump_data(envs, path)
+    #logger.info("data successfully dumped")
+
+    envs = parse_aoyu("data/aoyu/a2-16-test.txt")
+    print("DONE")
+    logger = set_level(logger, "debug")
+    env = envs[0]
+    obs = env.representation()
+    #simulate env with nearest neighbor action
+    rewards = []
+    for t in range(34):
+        current = env.vehicles[env.current_vehicle]
+        action = current.routes.popleft() - 1
+        if action >= env.nb_requests:
+            action = action - env.nb_requests
+        obs, reward, done = env.step(action)
+        rewards.append(reward)
+        delivered =  sum([request.state == "delivered" for request in env.requests])
+        all_delivered = env.is_all_delivered()
+        if done:
+            break
+    env.penalize_broken_time_windows()
+
+    total = sum([v.total_distance_travelled for v in env.vehicles])
+    logger.info(f"Episode finished after {t + 1} steps, with reward {total}")
+    for vehicle in env.vehicles:
+        logger.info(f'{vehicle} history: {vehicle.history}')
+    delivered =  sum([request.state == "delivered" for request in env.requests])
+    in_trunk = sum([r.state == "in_trunk" for r in env.requests])
+    pickup = sum([r.state == "pickup" for r in env.requests])
+    logger.info(f'delivered: {delivered}, in trunk: {in_trunk}, waiting: {pickup}')
+    logger.info("*** PENALTY ***")
+    logger.info("start_window: %s", env.penalty["start_window"])
+    logger.info("end_window: %s", env.penalty["end_window"])
+    logger.info("max_route_duration: %s", env.penalty["max_route_duration"])
+    logger.info("max_ride_time: %s", env.penalty["max_ride_time"])
+    logger.info("total penalty: %s", env.penalty["sum"])

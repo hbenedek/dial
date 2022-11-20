@@ -4,6 +4,7 @@ from log import logger
 from typing import Optional, Tuple, List, Dict
 from utils import float_equality, distance, coord2int
 import pickle
+from collections import deque
 
     
 class Request():
@@ -24,8 +25,8 @@ class Request():
         self.max_ride_time = max_ride_time
         self.state = "pickup"
         self.statedict = {"pickup": 0, "in_trunk": 1, "delivered": 2}
-        self.pickup_time: float = 10000
-        self.dropoff_time: float = 10000
+        self.pickup_time: float = 1440
+        self.dropoff_time: float = 1440
         self.being_served: int = 0
 
     def __repr__(self):
@@ -52,23 +53,28 @@ class Request():
         logger.debug( "setting new state: %s -> %s", self, state)
         self.state = state
 
-    def get_service_time(self):
+    def get_min_delivery_time(self):
         return distance(self.pickup_position, self.dropoff_position)
 
-    def tight_window(self, time_end: int):
+    def tight_window(self, time_end: int, nb_requests: int):
         """make the time windows as tight as possible"""
-        filter = lambda x: min(max(0, x), time_end)
-        service_time = int(self.get_service_time())
+        #filter = lambda x: min(max(0, x), time_end)
+        delivery_time = int(self.get_min_delivery_time())
         old_start = self.start_window.copy()
         old_end = self.end_window.copy()
-        #earliest i can deliver
-        self.end_window[0] = filter(max(self.end_window[0], self.start_window[0] + service_time))
-        #latest i can deliver
-        self.end_window[1] = filter(min(self.end_window[1], self.start_window[1] + self.max_ride_time))
-        #earliest i can pickup (in order to be able to reach end_window[0] within max ride time)
-        self.start_window[0] = filter(max(self.start_window[0], self.end_window[0] - self.max_ride_time))
-        #latest i can pickup (in order to arrive until end_window[1])
-        self.start_window[1] = filter(min(self.start_window[1], self.end_window[1] - service_time))
+        #outbound
+        if self.id < nb_requests / 2:
+            #earliest i can pickup (in order to be able to reach end_window[0] within max ride time)
+            self.start_window[0] = max(0, self.end_window[0] - self.max_ride_time - self.service_time)
+            #latest i can pickup (in order to arrive until end_window[1])
+            self.start_window[1] = min(self.end_window[1] - self.service_time, time_end)
+        #inbound
+        else:
+            #latest i can deliver
+            self.end_window[0] = max(0, self.start_window[0] + self.service_time + delivery_time)
+            #earliest i can deliver
+            self.end_window[1] = min(self.start_window[1] + self.service_time + self.max_ride_time, time_end)
+        
         logger.debug("setting new window for: start: %s -> %s, end: %s -> %s, for %s", old_start, self.start_window, old_end, self.end_window, self)
 
     def relax_window(self, time_end: int):
@@ -105,7 +111,7 @@ class Request():
         return max(0, self.dropoff_time - self.end_window[1])
 
     def calculate_ride_time_penalty(self):
-        return max(0, self.dropoff_time - self.pickup_time - self.max_ride_time)
+        return max(0, self.dropoff_time - (self.pickup_time + self.service_time) - self.max_ride_time)
 
 
 class Vehicle():
@@ -122,8 +128,10 @@ class Vehicle():
         self.last_distance_travelled = 0
         self.total_distance_travelled = 0
         self.frozen_until: float = 0.0
+        self.history: List[int] = []
         self.target_request: Optional[Request] = None
         self.destination = np.empty(2)
+        self.routes = deque()
 
     def __repr__(self):
         return f"Vehicle_{self.id}_status_{self.state}"
@@ -132,13 +140,7 @@ class Vehicle():
         return f"Vehicle_{self.id}_status_{self.state}"
 
     def get_distance_to_destination(self) -> float:
-        dist = distance(self.position, self.destination)
-        #if self.target_request:
-        #    if self.target_request.state == "pickup":
-        #        dist = dist + max(0, self.target_request.start_window[0] - dist - current_time)
-        #    if self.target_request.state == "dropoff":
-        #        dist = dist + max(0, self.target_request.end_window[0] - dist - current_time)
-        return dist
+        return distance(self.position, self.destination)
 
     def move(self, new_position: np.ndarray):
         """"set new position and save travelled distances"""
@@ -170,7 +172,7 @@ class Vehicle():
             self.trunk.remove(request)
             logger.debug("%s dropped of by %s", request, self)
             request.set_state("delivered")
-            request.dropoff_time = current_time
+            request.dropoff_time = current_time - request.service_time
         #else:
         #    logger.debug("ERROR: %s dropoff DENIED for %s", request, self)
 

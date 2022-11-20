@@ -4,40 +4,20 @@ from typing import List, Tuple, Optional
 from env import DarpEnv
 import torch.nn as nn
 import numpy as np
-from log import logger
+from log import logger, set_level
 from torch.utils.data import DataLoader
 from entity import Result
-from generator import dump_data, load_data
+from generator import dump_data, load_data, load_aoyo
 from utils import get_device
-
-
-def generate_supervised_dataset(max_step: int, envs: List[DarpEnv], test_size: float, batch_size: int) -> Tuple[DataLoader, DataLoader]:
-    dataset = []
-    for env in envs:
-        obs = env.reset()
-        for _ in range(max_step):
-            action = env.nearest_action_choice()
-            dataset.append([obs, action])
-            obs, _, done = env.step(action)
-            if done:
-                break
-
-    split_idx = int(len(dataset) * (1 - test_size))
-    train, test = dataset[:split_idx], dataset[split_idx:]
-    logger.info("Supervised train dataset generetad of size %s", len(train))
-    logger.info("Supervised test dataset generetad of size %s", len(test))
-    train_loader = DataLoader(train, batch_size=batch_size)
-    test_loader = DataLoader(test, batch_size=batch_size)
-    #TODO: save and dump loader objects
-    return train_loader, test_loader
+import glob
 
 
 def copycat_trainer(policy: Policy,
-             optimizer: torch.optim.Optimizer,
-             nb_epochs: int,
-             train_loader: DataLoader,
-             test_loader: DataLoader,
-             id: str) -> Result:
+        optimizer: torch.optim.Optimizer,
+        nb_epochs: int,
+        train_loader: DataLoader,
+        test_loader: DataLoader,
+        id: str) -> Result:
     """
     Trains the Transformer policy network against other policies depending on the dataloaders 
     (for the moment the nearest neighbour policy)
@@ -105,20 +85,55 @@ def copycat_trainer(policy: Policy,
     result.policy_dict = state_dict
     return result
 
-def supervised_trainer(envs_path: str, 
-                        result_path: str,
-                        max_steps: int,
-                        test_size: float,
-                        batch_size: int,
-                        nb_epochs: int,
-                        policy: Policy,
-                        optimizer:torch.optim.Optimizer,
-                        id: str) -> Result:
+def extract_state_action_pairs(envs, act, batch_size):
+    dataset = []
+    for env in envs:
+        obs = env.representation()
+        for _ in range(2 * env.nb_requests + env.nb_vehicles):
+            action = act(env)
+            dataset.append([obs, action])
+            obs, _, done = env.step(action)
+            if done:
+                break
+    logger.info("Supervised dataset generetad of size %s", len(dataset))
+    loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    return loader
 
-    envs = load_data(envs_path)
-    logger.info("dataset successfully loaded")
 
-    train_loader, test_loader = generate_supervised_dataset(max_step=max_steps, envs=envs, test_size=test_size, batch_size=batch_size)
+def generate_supervised_dataset(train_envs, test_envs, supervised_policy: str, batch_size: int):
+    if supervised_policy == "nn":
+        def act(env): 
+            return env.nearest_action_choice()
+    if supervised_policy == "rf":
+        def act(env): 
+            action = env.vehicles[env.current_vehicle].routes.popleft() - 1 
+            if action >= env.nb_requests:
+                action = action - env.nb_requests
+            return action
+    train_loader = extract_state_action_pairs(train_envs, act, batch_size)
+    test_loader = extract_state_action_pairs(test_envs, act, batch_size)
+    return train_loader, test_loader
+
+
+def supervised_trainer( 
+                    id: str,
+                    instance: str,
+                    result_path: str,
+                    supervised_policy: str,
+                    batch_size: int,
+                    nb_epochs: int,
+                    policy: Policy,
+                    optimizer:torch.optim.Optimizer,
+                    env_path: str="data/test_sets/generated-10000-a2-16.pkl") -> Result:
+
+    if instance:
+        train_envs, test_envs = load_aoyo(instance)
+    else:
+        envs = load_data(env_path)
+        split = len(envs) * 0.98
+        train_envs, test_envs = envs[:split], envs[split:]
+
+    train_loader, test_loader = generate_supervised_dataset(train_envs, test_envs, supervised_policy, batch_size)
     logger.info("train and test DataLoader objects successfully initialized")
 
     logger.info("training starts")
@@ -132,23 +147,34 @@ def supervised_trainer(envs_path: str,
 
 
 if __name__ == "__main__":
+    id = "result-a4-48-supervised-rf-01-aoyu"
     envs_path = "data/test_sets/generated-10000-a2-16.pkl"
+    instance="a4-48"
     result_path = "models"
-    max_steps = 1440 * 16
-    test_size = 0.05
-    batch_size = 64
-    nb_epochs = 5
-    policy = Aoyu(d_model=128, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
+    supervised_policy="rf"
+    batch_size = 256
+    nb_epochs = 10
+
+    policy = Aoyu(d_model=256, nhead=8, nb_requests=48, nb_vehicles=4, num_layers=4, time_end=1440, env_size=10)
     device = get_device()
-    PATH = "models/result-a2-16-supervised-nn-08-aoyu-model"
-    state = torch.load(PATH)
-    policy.load_state_dict(state)
-    logger.info("training on device: %s", device)
+    #PATH = "models/result-a2-16-supervised-nn-08-aoyu-model"
+    #state = torch.load(PATH)
+    #policy.load_state_dict(state)
     policy = policy.to(device)
-    optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4, weight_decay=1e-3)
-    id = "result-a2-16-supervised-nn-08-aoyu"
+    logger.info("training on device: %s", device)
+
+    optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
    
-    result = supervised_trainer(envs_path, result_path, max_steps, test_size, batch_size, nb_epochs, policy, optimizer, id) 
+    result = supervised_trainer(id, 
+                            instance,
+                            result_path,
+                            supervised_policy,
+                            batch_size, 
+                            nb_epochs, 
+                            policy,
+                            optimizer,
+                            envs_path) 
+
    
 
 
