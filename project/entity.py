@@ -16,7 +16,7 @@ class Request():
                 start_window: np.ndarray,
                 end_window: Optional[np.ndarray],
                 max_ride_time: int):
-        self.id = id - 1
+        self.id = id 
         self.pickup_position = pickup_position
         self.dropoff_position = dropoff_position
         self.service_time = service_time
@@ -195,7 +195,7 @@ class Vehicle():
                 self.position[1],
                 self.statedict[self.state]]
         trunk =  [r.id for r in self.trunk]
-        trunk = trunk + [0] * (self.capacity - len(self.trunk))
+        trunk = trunk + [0] * (self.capacity - len(trunk))
         return vector + trunk
 
     def calculate_max_route_duration_penalty(self):
@@ -212,4 +212,6 @@ class Result():
         self.batch_size = None
         self.d_model = None
         self.layers = None
+        self.routes = 0
+        self.penalty = 0
 

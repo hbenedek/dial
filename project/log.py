@@ -1,6 +1,7 @@
 import logging
 
-def init_logger(log_path: str="logs", file_name: str="a2-16-evaluate-ayou", level: str = "info") -> logging.Logger:
+def init_logger(log_path: str="logs", file_name: str="find_bug_04-48", level: str = "info") -> logging.Logger:
+    """Initializes a Logger object"""
     log_formatter = logging.Formatter("[%(asctime)s] [%(levelname)5s] [%(filename)s:%(lineno)s - %(funcName)s()]: %(message)s" )
     logger = logging.getLogger()
 
@@ -10,11 +11,13 @@ def init_logger(log_path: str="logs", file_name: str="a2-16-evaluate-ayou", leve
 
     console_handler = logging.StreamHandler()
     console_handler.setFormatter(log_formatter)
+
     logger.addHandler(console_handler)
     logger = set_level(logger, level)
     return logger
 
 def set_level(logger:logging.Logger, level: str) -> logging.Logger:
+    """Changes the logging level, two possible options(info/debug)"""
     if level == "info":
         logger.setLevel(logging.INFO)
     if level == "debug":

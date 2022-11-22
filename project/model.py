@@ -10,12 +10,15 @@ import numpy as np
 from env import DarpEnv
 from tqdm import tqdm 
 from utils import coord2int, seed_everything
-from generator import generate_environments, load_data, dump_data
+from generator import generate_environments, load_data, load_aoyo
 import time
 import copy
 import matplotlib.pyplot as plt
 from log import logger, set_level
 import evaluate
+from entity import Result
+import gc
+import psutil
 
 class DecoderModel(nn.Module):
     def __init__(self, d_model: int=512, nhead: int=8, nb_requests: int=16, nb_vehicles: int=2, num_layers: int=2, time_end: int=1440, env_size: int=10):
@@ -166,10 +169,12 @@ class Aoyu(nn.Module):
         super(Aoyu, self).__init__()
         self.nb_actions = nb_requests + 1
         self.nb_tokens =  nb_requests 
+        self.nb_vehicles = nb_vehicles
         self.nb_requests = nb_requests 
         self.device = get_device()
         self.time_end = time_end
         self.env_size = env_size
+        self.d_model = d_model
 
         #Request embeddings
         self.embed_time = nn.Embedding(time_end * 10 + 1, d_model) 
@@ -187,6 +192,12 @@ class Aoyu(nn.Module):
         self.encoder =  nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead)
         self.encoders = nn.TransformerEncoder(self.encoder, num_layers=num_layers)
         self.classifier = nn.Linear(self.nb_tokens * d_model, self.nb_actions)
+
+    def __repr__(self):
+        return f"aoyu_{self.d_model}"
+
+    def __str__(self):
+        return f"aoyu_{self.d_model}"
 
     def embeddings(self, world, requests, vehicles):
         r = []
@@ -366,26 +377,30 @@ def reinforce(policy: Policy,
     policy = policy.to(device)
     train_R = 0
     baseline_R = 0
+    routes = []
+    penalties = []
+    train_losses = []
     for i_epoch in range(nb_epochs):
         logger.info("*** EPOCH %s ***", i_epoch)
         for i_episode, env in enumerate(envs):
-            print(i_episode, end='\r')
+            logger.info("episode: %s, RAM: %s, CPU: %s", i_episode, psutil.virtual_memory().percent, psutil.cpu_percent())
             max_step = env.nb_requests * 2 + env.nb_vehicles
+
             env.reset()
-            baseline_env =  copy.deepcopy(env)
             #update baseline model after every n steps
             if i_episode % update_baseline == 0:
                 if train_R <= baseline_R:
                     logger.info("new baseline model selected after achiving %s reward", train_R)
                     baseline.load_state_dict(policy.state_dict())
 
-            #baseline_env = copy.deepcopy(env)
-
             #simulate episode with train and baseline policy
             with torch.no_grad():
-                baseline_rewards, _ = evaluate.simulate(max_step, baseline_env, baseline, greedy=True)
-                baseline_env.penalize_broken_time_windows()
-                baseline_penalty = baseline_env.penalty["sum"]
+                baseline_rewards, _ = evaluate.simulate(max_step, env, baseline, greedy=True)
+                env.penalize_broken_time_windows()
+                baseline_penalty = env.penalty["sum"]
+                #TODO: this is wrong we cannot restore the same env insted give it as parameters [requests, vehicles, depots], 
+                #TODO: we wil only need one env, generate new configuration after each episode
+                env.reset()  
                 
             rewards, log_probs = evaluate.simulate(max_step, env, policy)
             env.penalize_broken_time_windows()
@@ -396,20 +411,39 @@ def reinforce(policy: Policy,
             baseline_R = sum(baseline_rewards) + baseline_penalty
             sum_log_probs = sum(log_probs)
 
-            policy_loss = torch.mean((train_R - baseline_R)* sum_log_probs)
+            policy_loss = torch.mean((train_R - baseline_R) * sum_log_probs)
         
             #backpropagate
             optimizer.zero_grad()
             policy_loss.backward()
+            train_losses.append(policy_loss)
             torch.nn.utils.clip_grad_norm_(policy.parameters(), 1)
             optimizer.step()
+
+            #garbage collector
+            del(env)
+            gc.collect()
+
+            #test pahse
             if i_episode % 100 == 0:
                 with torch.no_grad():
                     test_env.reset()
-                    evaluate.evaluate_model(policy, test_env, max_step, i=i_episode)
+                    route, penalty = evaluate.evaluate_model(policy, test_env, max_step, i=i_episode)
+                    routes.append(route)
+                    penalties.append(penalty)
+            if i_episode > 1000:
+                break
+    
+    #saving results
+    policy = policy.to("cpu")
+    state_dict = policy.state_dict()
 
-    result = 0  
-    #TODO: create result object
+    result = Result(id)
+    result.routes = routes
+    result.penalty = penalties
+    result.train_loss = train_losses
+    result.test_loss = 0
+    result.policy_dict = state_dict
     return result
 
 
@@ -422,7 +456,7 @@ def reinforce_trainer(train_envs_path: str,
                         optimizer: torch.optim.Optimizer):
                         
     train_envs = load_data(train_envs_path)
-    test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=1440 * 16, dataset=test_env_path)
+    test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=100, dataset=test_env_path)
     logger.info("dataset successfully loaded")
 
     logger.info("training starts")
@@ -433,28 +467,31 @@ def reinforce_trainer(train_envs_path: str,
 
 if __name__ == "__main__":
     seed_everything(1)
-    train_envs_path = "data/test_sets/generated-10000-a2-16.pkl"
-    test_env_path = 'data/cordeau/a2-16.txt'  
+    train_envs_path = "data/processed/generated-10000-a2-16.pkl"
+    instance = "a2-16"
+    #train_envs, test_envs = load_aoyo(instance)
+    test_env_path = f'data/cordeau/{instance}.txt'  
     #env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=1000, dataset=FILE_NAME)
 
     result_path = "models"
     nb_epochs = 1
 
-    policy = Aoyu(d_model=128, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
+    policy = Aoyu(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
     device = get_device()
-    PATH = "models/result-a2-16-supervised-rf-01-aoyu-model"
-    state = torch.load(PATH)
-    policy.load_state_dict(state)
+    #PATH = "models/result-a4-48-supervised-rf-01-aoyu-model"
+    #PATH = "models/result-a2-16-supervised-rf-01-aoyu-model"
+    #state = torch.load(PATH)
+    #policy.load_state_dict(state)
     logger.info("training on device: %s", device)
     policy = policy.to(device)
+    logger.info(policy)
 
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4, weight_decay=1e-3)
 
     logger = set_level(logger, "info")
-    id = "result-a2-16-reinforce-nn-01-aoyu"
-
+    id = "result-a2-16-reinforce-01-aoyu"
     reinforce_trainer(train_envs_path, test_env_path, result_path, id ,nb_epochs, policy, optimizer)
-   
+  
     
 
 

@@ -147,15 +147,19 @@ def supervised_trainer(
 
 
 if __name__ == "__main__":
-    id = "result-a4-48-supervised-rf-01-aoyu"
+
+    ################################    EXAMPLE USAGE 1 (SUPERVISED TRAINING)   #######################################
+
     envs_path = "data/test_sets/generated-10000-a2-16.pkl"
-    instance="a4-48"
+    instance="a2-16"
     result_path = "models"
-    supervised_policy="rf"
-    batch_size = 256
+    supervised_policy="nn"
+    trial = "09"
+    batch_size = 512
     nb_epochs = 10
 
-    policy = Aoyu(d_model=256, nhead=8, nb_requests=48, nb_vehicles=4, num_layers=4, time_end=1440, env_size=10)
+    #initialize policy
+    policy = Aoyu(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
     device = get_device()
     #PATH = "models/result-a2-16-supervised-nn-08-aoyu-model"
     #state = torch.load(PATH)
@@ -163,8 +167,11 @@ if __name__ == "__main__":
     policy = policy.to(device)
     logger.info("training on device: %s", device)
 
+    #initialize optimizer
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
    
+    #start train
+    id = f"result-{instance}-supervised-{supervised_policy}-{trial}-{policy}"
     result = supervised_trainer(id, 
                             instance,
                             result_path,
