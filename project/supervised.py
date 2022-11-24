@@ -152,20 +152,18 @@ if __name__ == "__main__":
 
     ################################    EXAMPLE USAGE 1 (SUPERVISED TRAINING)   #######################################
 
-    envs_path = "data/test_sets/generated-10000-a2-16.pkl"
     instance="a4-48"
     result_path = "models"
     supervised_policy="rf"
     trial = "01"
     batch_size = 256
     nb_epochs = 10
+    id = f"result-{instance}-supervised-{supervised_policy}-{trial}-aoyu256"
 
     #initialize policy
-    policy = Aoyu(d_model=256, nhead=8, nb_requests=48, nb_vehicles=4, num_layers=4, time_end=1440, env_size=10)
+    PATH = "models/result-a2-16-supervised-nn-09-aoyu256-model"
+    policy = Aoyu(d_model=256, nhead=8, nb_requests=48, nb_vehicles=4, num_layers=4, time_end=1440, env_size=10, weights=PATH)
     device = get_device()
-    #PATH = "models/result-a2-16-supervised-nn-09-aoyu256-model"
-    #state = torch.load(PATH)
-    #policy.load_state_dict(state)
     policy = policy.to(device)
     logger.info("training on device: %s", device)
 
@@ -173,7 +171,6 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
    
     #start train
-    id = f"result-{instance}-supervised-{supervised_policy}-{trial}-aoyu256"
     result = supervised_trainer(id, 
                             instance,
                             result_path,
@@ -181,8 +178,7 @@ if __name__ == "__main__":
                             batch_size, 
                             nb_epochs, 
                             policy,
-                            optimizer,
-                            envs_path) 
+                            optimizer) 
 
    
 

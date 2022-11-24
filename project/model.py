@@ -373,7 +373,7 @@ def reinforce(policy: Policy,
              update_baseline: int,
              test_env: DarpEnv):
 
-    env = DarpEnv(10, nb_requests, nb_vehicles, time_end=1440, max_step=nb_requests * 2 + nb_vehicles)         
+    env = DarpEnv(10, nb_requests, nb_vehicles, time_end=1440, max_step=nb_requests * 2 + nb_vehicles, max_route_duration=480, capacity=3, max_ride_time=30)         
     #init baseline model
     baseline = copy.deepcopy(policy)
     baseline = baseline.to(device)
@@ -395,7 +395,7 @@ def reinforce(policy: Policy,
                 baseline.load_state_dict(policy.state_dict())
 
         env.reset()
-        entities = env.requests, env.vehicles, env.depots
+        entities = env.vehicles, env.requests, env.depots
         #simulate episode with train and baseline policy
         with torch.no_grad():
             baseline_rewards, _ = evaluate.simulate(env, baseline, greedy=True)
@@ -405,7 +405,7 @@ def reinforce(policy: Policy,
             
         rewards, log_probs = evaluate.simulate(env, policy)
         env.penalize_broken_time_windows()
-        penalty = env.penalty["sum"]
+        penalty = env.penalty["sum"] * 0 #TODO: NO PENALTY
 
         #aggregate rewards and logprobs
         train_R = sum(rewards) + penalty
@@ -428,7 +428,7 @@ def reinforce(policy: Policy,
         if i_episode % 100 == 0:
             with torch.no_grad():
                 test_env.reset()
-                route, penalty = evaluate.evaluate_model(policy, test_env, i=i_episode)
+                route, penalty, delivered = evaluate.evaluate_model(policy, test_env, i=i_episode)
                 routes.append(route)
                 penalties.append(penalty)
         if i_episode > 1000:
@@ -457,7 +457,12 @@ def reinforce_trainer(test_env_path: str,
                     policy: Policy, 
                     optimizer: torch.optim.Optimizer):
            
-    test_env = DarpEnv(10, nb_requests, nb_vehicles, time_end=1440, max_step=nb_requests * 2 + nb_vehicles, dataset=test_env_path)
+    test_env = DarpEnv(10, 
+                        nb_requests, 
+                        nb_vehicles, 
+                        time_end=1440, 
+                        max_step=nb_requests * 2 + nb_vehicles, 
+                        dataset=test_env_path)
     logger.info("dataset successfully loaded")
 
     logger.info("training starts")
@@ -468,14 +473,11 @@ def reinforce_trainer(test_env_path: str,
 
 if __name__ == "__main__":
     seed_everything(1)
-    #train_envs, test_envs = load_aoyo(instance)
-    #env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=1000, dataset=FILE_NAME)
-
     result_path = "models"
     nb_vehicles = 2
     nb_requests = 16
     variant = "a"
-    instance = f"{variant}{nb_requests}-{nb_vehicles}"
+    instance = f"{variant}{nb_vehicles}-{nb_requests}"
     test_env_path = f'data/cordeau/{instance}.txt'  
     id = f"result-{instance}-reinforce-01-aoyu"
 

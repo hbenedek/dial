@@ -215,6 +215,7 @@ class Result():
         self.batch_size = None
         self.d_model = None
         self.layers = None
+        self.df = None
         self.routes = 0
         self.penalty = 0
 

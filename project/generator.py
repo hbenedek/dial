@@ -309,6 +309,8 @@ if __name__ == "__main__":
 
     ###################################    EXAMPLE USAGE 2 (AOYU'S DATASET)   ##########################################
 
+    # loading 10.000 train and 1.000 test darp environment from Aoyu's dataset along with the RF algorithm scheduling
+
     instance = "a2-16"
     train_envs, test_envs = load_aoyo(instance)
 

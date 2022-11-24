@@ -145,10 +145,7 @@ class DarpEnv(gym.Env):
                 events[vehicle] = self.current_time + event
             elif vehicle.state is "frozen":
                 events[vehicle] =vehicle.frozen_until
-        events = {v: e for v,e in events.items()}
-        logger.info("%s", events)
         events = {v: e for v,e in events.items() if e >= self.current_time}
-        logger.info("%s", events)
         next_vehicle = min(events, key=events.get)
         new_time = events[next_vehicle]
         self.last_time_gap = new_time - self.current_time
@@ -380,11 +377,13 @@ if __name__ == "__main__":
     ###################################    EXAMPLE USAGE 1 (ENV SIMULATOR)   ##########################################
 
     logger = set_level(logger, "debug")
+
+    # loading and initializing a darp environment
     FILE_NAME = 'data/cordeau/a2-16.txt'
     env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=1000, dataset=FILE_NAME)
     obs = env.representation()
 
-    #simulate env with nearest neighbor action
+    # simulate env with nearest neighbor action
     rewards = []
     for t in range(100):
         action = env.nearest_action_choice()    
@@ -394,8 +393,10 @@ if __name__ == "__main__":
         all_delivered = env.is_all_delivered()
         if done:
             break
+
     env.penalize_broken_time_windows()
 
+    # print out results
     total = sum([v.total_distance_travelled for v in env.vehicles])
     logger.info(f"Episode finished after {t + 1} steps, with reward {total}")
     for vehicle in env.vehicles:

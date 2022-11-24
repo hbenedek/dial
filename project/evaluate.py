@@ -80,7 +80,7 @@ def evaluate_aoyu(policy, instance: str, pad: bool=False):
         except:
             logger.info("PROBLEM OCCURED DURING EVALUATING INSTANCE %s", i)
         
-    df = pd.DataFrame({"cost": costs, "penalty": penalties, "objective": objectives})
+    df = pd.DataFrame({"cost": costs, "penalty": penalties, "objective": objectives, "delivered": deliveries})
     df["gap"] = (df["cost"] / df["objective"] - 1) * 100
     mean_gap = df["gap"].mean()
     mean_penalty = df["penalty"].mean()
@@ -89,21 +89,48 @@ def evaluate_aoyu(policy, instance: str, pad: bool=False):
 
 
 if __name__ == "__main__":
+
+    ####################    EXAMPLE USAGE 1 (EVALUATE MODEL PERFORMANCE ON 1 teste env)   ###########################
+    logger = set_level(logger, "info")
+
+    # loading the darp instance
     FILE_NAME = 'data/cordeau/a2-16.txt'
     test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=34, dataset=FILE_NAME)
-    logger = set_level(logger, "debug")
-    policy = model.Aoyu(d_model=256, nhead=8, nb_requests=48, nb_vehicles=4, num_layers=4, time_end=1440, env_size=10)
-    PATH = "models/result-a4-48-supervised-rf-01-aoyu256"
+
+    policy = model.Aoyu(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
+    # loading a Result object, containing a state_dict of a trained model (WARNING: for now model hyperparameters are not stored in the result object) 
+    PATH = "models/result-a2-16-supervised-rf-01-aoyu256"
     r = load_data(PATH)
     state = r.policy_dict
     policy.load_state_dict(state)
-    policy.eval()
+
+    # passing the model to CUDA if available 
     device = get_device()
     policy.to(device)
-    #evaluate_model(policy, test_env, max_step=34)
-    instance = "a2-16"
+    policy.eval()
 
-    df = evaluate_aoyu(policy, f"data/aoyu/{instance}-test.txt")
-    df.to_csv("evaluations/data-a2-16-test-model-rf-a4-48-02")
+    routing_cost, window_penalty, delivered = evaluate_model(policy, test_env)
+
+    ####################    EXAMPLE USAGE 2 (EVALUATE MODEL PERFORMANCE ON 1000 teste env)   ###########################
+
+    logger = set_level(logger, "info")
+
+    instance = "a2-16"
+    test_path = f"data/aoyu/{instance}-test.txt"
+
+    policy = model.Aoyu(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
+    # loading a Result object, containing a state_dict of a trained model (WARNING: for now model hyperparameters are not stored in the result object) 
+    PATH = "models/result-a2-16-supervised-rf-01-aoyu256"
+    r = load_data(PATH)
+    state = r.policy_dict
+    policy.load_state_dict(state)
+
+    # passing the model to CUDA if available 
+    device = get_device()
+    policy.to(device)
+    policy.eval()
+
+    df = evaluate_aoyu(policy, test_path)
+    df.to_csv(f"evaluations/data-{instance}-test-model-rf-a2-16-02")
 
 
