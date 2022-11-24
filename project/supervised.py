@@ -133,6 +133,8 @@ def supervised_trainer(
         split = len(envs) * 0.98
         train_envs, test_envs = envs[:split], envs[split:]
 
+    logger.info("training id: %s", id)
+
     train_loader, test_loader = generate_supervised_dataset(train_envs, test_envs, supervised_policy, batch_size)
     logger.info("train and test DataLoader objects successfully initialized")
 
@@ -151,17 +153,17 @@ if __name__ == "__main__":
     ################################    EXAMPLE USAGE 1 (SUPERVISED TRAINING)   #######################################
 
     envs_path = "data/test_sets/generated-10000-a2-16.pkl"
-    instance="a2-16"
+    instance="a4-48"
     result_path = "models"
-    supervised_policy="nn"
-    trial = "09"
-    batch_size = 512
+    supervised_policy="rf"
+    trial = "01"
+    batch_size = 256
     nb_epochs = 10
 
     #initialize policy
-    policy = Aoyu(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
+    policy = Aoyu(d_model=256, nhead=8, nb_requests=48, nb_vehicles=4, num_layers=4, time_end=1440, env_size=10)
     device = get_device()
-    #PATH = "models/result-a2-16-supervised-nn-08-aoyu-model"
+    #PATH = "models/result-a2-16-supervised-nn-09-aoyu256-model"
     #state = torch.load(PATH)
     #policy.load_state_dict(state)
     policy = policy.to(device)
@@ -171,7 +173,7 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
    
     #start train
-    id = f"result-{instance}-supervised-{supervised_policy}-{trial}-{policy}"
+    id = f"result-{instance}-supervised-{supervised_policy}-{trial}-aoyu256"
     result = supervised_trainer(id, 
                             instance,
                             result_path,

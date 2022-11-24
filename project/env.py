@@ -1,6 +1,5 @@
 from logging import Logger
 from typing import Optional, Tuple, List, Dict
-from gym.core import RewardWrapper
 import numpy as np
 import gym
 import torch
@@ -9,6 +8,7 @@ from log import logger, set_level
 from entity import Request, Vehicle
 import generator
 
+#TODO: get rid of max_step in init everywhere
 class DarpEnv(gym.Env):
     """Custom Environment that follows gym interface"""
     def __init__(self,
@@ -26,7 +26,7 @@ class DarpEnv(gym.Env):
         super(DarpEnv, self).__init__()
         logger.debug("initializing env")
         self.size = size
-        self.max_step = max_step
+        self.max_step = nb_requests * 2 + nb_vehicles
         self.nb_requests = nb_requests
         self.nb_vehicles = nb_vehicles
         self.capacity = capacity
@@ -76,6 +76,7 @@ class DarpEnv(gym.Env):
             logger.debug("tightening window constraints for all Requests")
             for request in requests:
                 request.tight_window(self.time_end, self.nb_requests)
+        self.depots = self.start_depot, self.end_depot
         self.waiting_vehicles = [vehicle.id for vehicle in self.vehicles]
         self.current_vehicle = self.waiting_vehicles.pop()
         logger.debug("new current vehicle selected: %s", self.current_vehicle)
@@ -121,6 +122,7 @@ class DarpEnv(gym.Env):
         #vehicle aims at end depot
         if action == self.nb_requests:
             current_vehicle.destination = self.end_depot
+            current_vehicle.to_be_finished = 1
         #vehicle aims at Request, depending on trunk it decides to pickup or dropoff
         else:
             target_request = self.requests[action]
@@ -130,7 +132,7 @@ class DarpEnv(gym.Env):
         current_vehicle.history.append(action)
         current_vehicle.set_state("busy")
 
-    def update_time_step(self, epsilon=0.1) -> Vehicle:
+    def update_time_step(self, epsilon=0.1) -> Tuple[Vehicle, Dict[Vehicle, float]]:
         "For each vehicle queries the next decision time and sets the current time attribute to the minimum of these values"
         logger.debug("Updating time step...")
         events = dict()
@@ -143,8 +145,10 @@ class DarpEnv(gym.Env):
                 events[vehicle] = self.current_time + event
             elif vehicle.state is "frozen":
                 events[vehicle] =vehicle.frozen_until
-        events = {v: e for v,e in events.items() if e > self.current_time}
-
+        events = {v: e for v,e in events.items()}
+        logger.info("%s", events)
+        events = {v: e for v,e in events.items() if e >= self.current_time}
+        logger.info("%s", events)
         next_vehicle = min(events, key=events.get)
         new_time = events[next_vehicle]
         self.last_time_gap = new_time - self.current_time
@@ -154,12 +158,12 @@ class DarpEnv(gym.Env):
 
         #unfreeze vehicles
         for vehicle in self.vehicles:
-            if vehicle.state is "frozen" and self.current_time >= vehicle.frozen_until:
+            if vehicle.state is "frozen" and self.current_time > vehicle.frozen_until:
                 vehicle.set_state("waiting")
 
-        return next_vehicle
+        return next_vehicle, events
 
-    def update_vehicle_position(self, vehicle: Vehicle):
+    def update_vehicle_position(self, vehicle: Vehicle, events: Dict[Vehicle, float]):
         """
         update just the vehicle which the last event corresponds to
         """
@@ -190,7 +194,12 @@ class DarpEnv(gym.Env):
         elif distance(self.end_depot, vehicle.position) < 0.01:
             vehicle.set_state("finished")
             self.update_needed = True
-    
+
+        # check if multiple min values
+        #next_vehicle = min(events, key=events.get)
+        #if len([e for e in events.values() if e == events[next_vehicle]]) > 1:
+        #    self.update_needed = True
+
         if all([vehicle.state is "finished" for vehicle in self.vehicles]):
             self.update_needed = False
         elif all([vehicle.state in ["busy", "frozen", "finished"] for vehicle in self.vehicles]):
@@ -210,7 +219,7 @@ class DarpEnv(gym.Env):
             return torch.tensor(mask)
         #if trunk is empty, end depot is available 
         #if one vehicle left, it shoud deliver all remaining requests
-        if sum([v.state == "finished" for v in self.vehicles]) == (self.nb_vehicles - 1) and sum([r.state == "delivered" for r in self.requests]) < self.nb_requests:
+        if sum([v.to_be_finished == 1 for v in self.vehicles]) == (self.nb_vehicles - 1) and sum([r.state == "delivered" for r in self.requests]) < self.nb_requests:
             mask[-1] = 0
         return torch.tensor(mask + self.available_actions)
 
@@ -229,8 +238,8 @@ class DarpEnv(gym.Env):
         if next_player == self.nb_vehicles:
             self.update_needed = True #if a Vehicle arrives at end depot we need to perform one more update
             while self.update_needed:
-                vehicle = self.update_time_step()
-                self.update_vehicle_position(vehicle)
+                vehicle, events = self.update_time_step()
+                self.update_vehicle_position(vehicle, events)
 
             logger.debug("querying waiting vehicles for new destination assignment")
             for vehicle in self.vehicles:

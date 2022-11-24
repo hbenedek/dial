@@ -367,10 +367,13 @@ class Policy(nn.Module):
 
 def reinforce(policy: Policy,
              optimizer: torch.optim.Optimizer,
-             nb_epochs: int, 
+             nb_episodes,
+             nb_requests: int,
+             nb_vehicles: int,
              update_baseline: int,
-             envs: List[DarpEnv],
              test_env: DarpEnv):
+
+    env = DarpEnv(10, nb_requests, nb_vehicles, time_end=1440, max_step=nb_requests * 2 + nb_vehicles)         
     #init baseline model
     baseline = copy.deepcopy(policy)
     baseline = baseline.to(device)
@@ -380,60 +383,57 @@ def reinforce(policy: Policy,
     routes = []
     penalties = []
     train_losses = []
-    for i_epoch in range(nb_epochs):
-        logger.info("*** EPOCH %s ***", i_epoch)
-        for i_episode, env in enumerate(envs):
-            logger.info("episode: %s, RAM: %s, CPU: %s", i_episode, psutil.virtual_memory().percent, psutil.cpu_percent())
-            max_step = env.nb_requests * 2 + env.nb_vehicles
 
-            env.reset()
-            #update baseline model after every n steps
-            if i_episode % update_baseline == 0:
-                if train_R <= baseline_R:
-                    logger.info("new baseline model selected after achiving %s reward", train_R)
-                    baseline.load_state_dict(policy.state_dict())
 
-            #simulate episode with train and baseline policy
-            with torch.no_grad():
-                baseline_rewards, _ = evaluate.simulate(max_step, env, baseline, greedy=True)
-                env.penalize_broken_time_windows()
-                baseline_penalty = env.penalty["sum"]
-                #TODO: this is wrong we cannot restore the same env insted give it as parameters [requests, vehicles, depots], 
-                #TODO: we wil only need one env, generate new configuration after each episode
-                env.reset()  
-                
-            rewards, log_probs = evaluate.simulate(max_step, env, policy)
-            env.penalize_broken_time_windows()
-            penalty = env.penalty["sum"]
-
-            #aggregate rewards and logprobs
-            train_R = sum(rewards) + penalty
-            baseline_R = sum(baseline_rewards) + baseline_penalty
-            sum_log_probs = sum(log_probs)
-
-            policy_loss = torch.mean((train_R - baseline_R) * sum_log_probs)
+    for i_episode in range(nb_episodes):
+        logger.info("episode: %s, RAM: %s, CPU: %s", i_episode, psutil.virtual_memory().percent, psutil.cpu_percent())
         
-            #backpropagate
-            optimizer.zero_grad()
-            policy_loss.backward()
-            train_losses.append(policy_loss)
-            torch.nn.utils.clip_grad_norm_(policy.parameters(), 1)
-            optimizer.step()
+        #update baseline model after every n steps
+        if i_episode % update_baseline == 0:
+            if train_R <= baseline_R:
+                logger.info("new baseline model selected after achiving %s reward", train_R)
+                baseline.load_state_dict(policy.state_dict())
 
-            #garbage collector
-            del(env)
-            gc.collect()
+        env.reset()
+        entities = env.requests, env.vehicles, env.depots
+        #simulate episode with train and baseline policy
+        with torch.no_grad():
+            baseline_rewards, _ = evaluate.simulate(env, baseline, greedy=True)
+            env.penalize_broken_time_windows()
+            baseline_penalty = env.penalty["sum"]
+            env.reset(entities=entities)  
+            
+        rewards, log_probs = evaluate.simulate(env, policy)
+        env.penalize_broken_time_windows()
+        penalty = env.penalty["sum"]
 
-            #test pahse
-            if i_episode % 100 == 0:
-                with torch.no_grad():
-                    test_env.reset()
-                    route, penalty = evaluate.evaluate_model(policy, test_env, max_step, i=i_episode)
-                    routes.append(route)
-                    penalties.append(penalty)
-            if i_episode > 1000:
-                break
+        #aggregate rewards and logprobs
+        train_R = sum(rewards) + penalty
+        baseline_R = sum(baseline_rewards) + baseline_penalty
+        sum_log_probs = sum(log_probs)
+
+        policy_loss = torch.mean((train_R - baseline_R) * sum_log_probs)
     
+        #backpropagate
+        optimizer.zero_grad()
+        policy_loss.backward()
+        train_losses.append(policy_loss)
+        torch.nn.utils.clip_grad_norm_(policy.parameters(), 1)
+        optimizer.step()
+
+        #garbage collector
+        gc.collect()
+
+        #test phase
+        if i_episode % 100 == 0:
+            with torch.no_grad():
+                test_env.reset()
+                route, penalty = evaluate.evaluate_model(policy, test_env, i=i_episode)
+                routes.append(route)
+                penalties.append(penalty)
+        if i_episode > 1000:
+            break
+
     #saving results
     policy = policy.to("cpu")
     state_dict = policy.state_dict()
@@ -447,50 +447,54 @@ def reinforce(policy: Policy,
     return result
 
 
-def reinforce_trainer(train_envs_path: str, 
-                        test_env_path: str, 
-                        result_path: str,
-                        id: str,
-                        nb_epochs: int, 
-                        policy: Policy, 
-                        optimizer: torch.optim.Optimizer):
-                        
-    train_envs = load_data(train_envs_path)
-    test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=100, dataset=test_env_path)
+def reinforce_trainer(test_env_path: str, 
+                    result_path: str,
+                    id: str,
+                    nb_episodes: int, 
+                    nb_requests: int,
+                    nb_vehicles: int,
+                    update_baseline: int,
+                    policy: Policy, 
+                    optimizer: torch.optim.Optimizer):
+           
+    test_env = DarpEnv(10, nb_requests, nb_vehicles, time_end=1440, max_step=nb_requests * 2 + nb_vehicles, dataset=test_env_path)
     logger.info("dataset successfully loaded")
 
     logger.info("training starts")
-    result = reinforce(policy, optimizer, nb_epochs, update_baseline=100, envs=train_envs,test_env=test_env)
+    result = reinforce(policy, optimizer, nb_episodes, nb_requests, nb_vehicles,  update_baseline, test_env=test_env)
     torch.save(policy.state_dict(), result_path + '/' + id + "-model")
     return result
 
 
 if __name__ == "__main__":
     seed_everything(1)
-    train_envs_path = "data/processed/generated-10000-a2-16.pkl"
-    instance = "a2-16"
     #train_envs, test_envs = load_aoyo(instance)
-    test_env_path = f'data/cordeau/{instance}.txt'  
     #env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=1000, dataset=FILE_NAME)
 
     result_path = "models"
-    nb_epochs = 1
+    nb_vehicles = 2
+    nb_requests = 16
+    variant = "a"
+    instance = f"{variant}{nb_requests}-{nb_vehicles}"
+    test_env_path = f'data/cordeau/{instance}.txt'  
+    id = f"result-{instance}-reinforce-01-aoyu"
 
-    policy = Aoyu(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
+    nb_episodes= 1000
+    update_baseline = 100
+
+    policy = Aoyu(d_model=256, nhead=8, nb_requests=nb_requests, nb_vehicles=nb_vehicles, num_layers=4, time_end=1440, env_size=10)
     device = get_device()
-    #PATH = "models/result-a4-48-supervised-rf-01-aoyu-model"
-    #PATH = "models/result-a2-16-supervised-rf-01-aoyu-model"
-    #state = torch.load(PATH)
-    #policy.load_state_dict(state)
+    PATH = "models/result-a2-16-supervised-rf-01-aoyu256"
+    r = load_data(PATH)
+    state = r.policy_dict
+    policy.load_state_dict(state)
     logger.info("training on device: %s", device)
     policy = policy.to(device)
-    logger.info(policy)
 
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4, weight_decay=1e-3)
 
     logger = set_level(logger, "info")
-    id = "result-a2-16-reinforce-01-aoyu"
-    reinforce_trainer(train_envs_path, test_env_path, result_path, id ,nb_epochs, policy, optimizer)
+    reinforce_trainer(test_env_path, result_path, id ,nb_episodes, nb_requests, nb_vehicles, update_baseline, policy, optimizer)
   
     
 

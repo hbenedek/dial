@@ -1,6 +1,6 @@
 import logging
 
-def init_logger(log_path: str="logs", file_name: str="find_bug_04-48", level: str = "info") -> logging.Logger:
+def init_logger(log_path: str="logs", file_name: str="bug", level: str = "info") -> logging.Logger:
     """Initializes a Logger object"""
     log_formatter = logging.Formatter("[%(asctime)s] [%(levelname)5s] [%(filename)s:%(lineno)s - %(funcName)s()]: %(message)s" )
     logger = logging.getLogger()

@@ -22,6 +22,8 @@ class Request():
         self.service_time = service_time
         self.start_window = start_window
         self.end_window = end_window
+        self.original_start_window = start_window # original windows will be tightened, for evaluation we still want to use these
+        self.original_end_window = end_window
         self.max_ride_time = max_ride_time
         self.state = "pickup"
         self.statedict = {"pickup": 0, "in_trunk": 1, "delivered": 2}
@@ -60,8 +62,8 @@ class Request():
         """make the time windows as tight as possible"""
         #filter = lambda x: min(max(0, x), time_end)
         delivery_time = int(self.get_min_delivery_time())
-        old_start = self.start_window.copy()
-        old_end = self.end_window.copy()
+        self.original_start_window = self.start_window.copy()
+        self.original_end_window = self.end_window.copy()
         #outbound
         if self.id < nb_requests / 2:
             #earliest i can pickup (in order to be able to reach end_window[0] within max ride time)
@@ -75,7 +77,7 @@ class Request():
             #earliest i can deliver
             self.end_window[1] = min(self.start_window[1] + self.service_time + self.max_ride_time, time_end)
         
-        logger.debug("setting new window for: start: %s -> %s, end: %s -> %s, for %s", old_start, self.start_window, old_end, self.end_window, self)
+        logger.debug("setting new window for: start: %s -> %s, end: %s -> %s, for %s", self.original_start_window, self.start_window, self.original_end_window, self.end_window, self)
 
     def relax_window(self, time_end: int):
         """drop all window constrains"""
@@ -105,10 +107,10 @@ class Request():
         return vector
 
     def calculate_pickup_penalty(self):
-        return max(0, self.pickup_time - self.start_window[1])     
+        return max(0, self.pickup_time - self.original_start_window[1])     
 
     def calculate_dropoff_penalty(self):
-        return max(0, self.dropoff_time - self.end_window[1])
+        return max(0, self.dropoff_time - self.original_end_window[1])
 
     def calculate_ride_time_penalty(self):
         return max(0, self.dropoff_time - (self.pickup_time + self.service_time) - self.max_ride_time)
@@ -127,6 +129,7 @@ class Vehicle():
         self.dist_to_destination: float = 0
         self.last_distance_travelled = 0
         self.total_distance_travelled = 0
+        self.to_be_finished = 0 #flag changes when Vehicle decides to aim for end_depot
         self.frozen_until: float = 0.0
         self.history: List[int] = []
         self.target_request: Optional[Request] = None
