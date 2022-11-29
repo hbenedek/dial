@@ -1,4 +1,4 @@
-from model import Policy, Aoyu
+from model import Policy
 import torch
 from typing import List, Tuple, Optional
 from env import DarpEnv
@@ -8,8 +8,10 @@ from log import logger, set_level
 from torch.utils.data import DataLoader
 from entity import Result
 from generator import dump_data, load_data, load_aoyo
+from evaluate import evaluate_aoyu
 from utils import get_device
 import glob
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 def copycat_trainer(policy: Policy,
@@ -23,6 +25,9 @@ def copycat_trainer(policy: Policy,
     (for the moment the nearest neighbour policy)
     """
     criterion = nn.CrossEntropyLoss()
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=50, factor=0.99)
+
+    running_loss = 0
     train_losses = []
     test_losses = []
     accuracies = []
@@ -44,6 +49,9 @@ def copycat_trainer(policy: Policy,
 
             loss.backward()
             optimizer.step()
+
+            running_loss += loss.item()
+            scheduler.step(running_loss)
 
             total += supervised_actions.size(0)
             model_actions = torch.max(outputs, 1).indices
@@ -152,24 +160,23 @@ if __name__ == "__main__":
 
     ################################    EXAMPLE USAGE 1 (SUPERVISED TRAINING)   #######################################
 
-    instance="a4-48"
+    instance="a2-16"
     result_path = "models"
-    supervised_policy="rf"
-    trial = "01"
+    supervised_policy="nn"
+    trial = "06"
     batch_size = 256
-    nb_epochs = 10
-    id = f"result-{instance}-supervised-{supervised_policy}-{trial}-aoyu256"
+    nb_epochs = 20
+    id = f"result-{instance}-supervised-{supervised_policy}-{trial}-aoy4layer"
 
     #initialize policy
-    PATH = "models/result-a2-16-supervised-nn-09-aoyu256-model"
-    policy = Aoyu(d_model=256, nhead=8, nb_requests=48, nb_vehicles=4, num_layers=4, time_end=1440, env_size=10, weights=PATH)
+    policy = Policy(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
     device = get_device()
     policy = policy.to(device)
     logger.info("training on device: %s", device)
 
     #initialize optimizer
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
-   
+
     #start train
     result = supervised_trainer(id, 
                             instance,
@@ -179,6 +186,43 @@ if __name__ == "__main__":
                             nb_epochs, 
                             policy,
                             optimizer) 
+
+
+    test_path = f"data/aoyu/{instance}-test.txt"
+    df = evaluate_aoyu(policy, test_path)
+    df.to_csv(f"evaluations/new-data-{instance}-test-model-nn-a2-16")
+
+    ###
+
+    instance="a4-48"
+    supervised_policy="rf"
+    id = f"result-{instance}-supervised-{supervised_policy}-{trial}-aoy4layer"
+
+    #initialize policy
+    policy = Policy(d_model=256, nhead=8, nb_requests=48, nb_vehicles=4, num_layers=8, time_end=1440, env_size=10)
+    device = get_device()
+    policy = policy.to(device)
+    logger.info("training on device: %s", device)
+
+    #initialize optimizer
+    optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
+
+    #start train
+    result = supervised_trainer(id, 
+                            instance,
+                            result_path,
+                            supervised_policy,
+                            batch_size, 
+                            nb_epochs, 
+                            policy,
+                            optimizer) 
+
+    instance="a2-16"
+    test_path = f"data/aoyu/{instance}-test.txt"
+    df = evaluate_aoyu(policy, test_path)
+    df.to_csv(f"evaluations/new-data-{instance}-test-model-rf-a4-48")
+
+    
 
    
 

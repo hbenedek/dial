@@ -295,10 +295,14 @@ class DarpEnv(gym.Env):
         end = [round(r.calculate_dropoff_penalty(), 2) for r in self.requests]
         max_ride_time = [round(r.calculate_ride_time_penalty(), 2) for r in self.requests] 
         max_route_duration = [round(v.calculate_max_route_duration_penalty(), 2) for v in self.vehicles]
+
+        merged = start + end + max_ride_time + max_route_duration
+        nb_penalty = sum(v > 0 for term in merged for v in term)
         self.penalty = {"start_window": start, 
                         "end_window": end,
                         "max_route_duration": max_route_duration,
                         "max_ride_time": max_ride_time,
+                        "nb_penalty": nb_penalty,
                         "sum": sum(start + end + max_route_duration + max_ride_time)}
 
 
@@ -343,9 +347,10 @@ class DarpEnv(gym.Env):
                     self.max_route_duration])
         requests = np.stack([r.get_vector() for r in self.requests])
         if self.current_vehicle != self.nb_vehicles:
-            vehicle = np.stack(self.vehicles[self.current_vehicle].get_vector())
+            curr = self.vehicles[self.current_vehicle]
+            vehicle = np.stack(curr.get_vector(self.requests))
         else: 
-            vehicle = np.array([0, 0, 0, 0, 0, 0, 0])
+            vehicle = np.array([0] * (2 * self.nb_requests + 1))
         return world, requests, vehicle
 
 

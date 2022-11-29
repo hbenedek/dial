@@ -192,14 +192,13 @@ class Vehicle():
         else:
             return request.pickup_position
             
-    def get_vector(self) -> List[int]:
+    def get_vector(self, requests: List[Request]) -> List[float]:
         """returns the vector representation of the Vehicle"""
-        vector = [self.position[0],
-                self.position[1],
-                self.statedict[self.state]]
-        trunk =  [r.id for r in self.trunk]
-        trunk = trunk + [0] * (self.capacity - len(trunk))
-        return vector + trunk
+        return np.array([self.position[0], self.position[1]] +
+                        [distance(self.position, r.pickup_position) for r in requests] +   
+                        [distance(self.position, r.dropoff_position) for r in requests] + 
+                        [distance(self.position, np.array([0, 0]))])
+        
 
     def calculate_max_route_duration_penalty(self):
        return max(0, self.total_distance_travelled - self.max_route_duration) 

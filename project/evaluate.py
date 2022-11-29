@@ -15,10 +15,8 @@ def simulate(env: DarpEnv, policy, greedy: bool=False) -> Tuple[List[float], Lis
         world, requests, vehicle  = state
         state = [torch.tensor(world).unsqueeze(0), torch.tensor(requests).unsqueeze(0), torch.tensor(vehicle).unsqueeze(0)]
         mask = env.mask_illegal()
-        if greedy:
-            action, log_prob = policy.greedy(state, mask)
-        else:
-            action, log_prob = policy.act(state, mask)
+    
+        action, log_prob = policy.act(state, mask, greedy=greedy)
         state, reward, done = env.step(action)
 
         rewards.append(reward)
@@ -33,9 +31,11 @@ def evaluate_model(policy, env: DarpEnv, i: int=0, log: bool=True):
     if env.nb_requests < policy.nb_requests or env.nb_vehicles < policy.nb_vehicles:
         env.pad_env(policy.nb_vehicles, policy.nb_requests)
 
+    #simulation
     rewards, _ = simulate(env, policy, greedy=True)
     env.penalize_broken_time_windows()
 
+    #calculating metrics
     total = sum([v.total_distance_travelled for v in env.vehicles])
     delivered =  sum([request.state == "delivered" for request in env.requests])
     in_trunk = sum([r.state == "in_trunk" for r in env.requests])
@@ -54,12 +54,13 @@ def evaluate_model(policy, env: DarpEnv, i: int=0, log: bool=True):
         logger.info("max_ride_time: %s", env.penalty["max_ride_time"])
         logger.info("sum: %s", env.penalty["sum"])
         logger.info(f"TEST {i}*****************************************************************")
-    return total, env.penalty["sum"], delivered
+    return total, env.penalty, delivered
 
 
-def evaluate_aoyu(policy, instance: str, pad: bool=False):
+def evaluate_aoyu(policy, instance: str):
     costs = []
     penalties = []
+    nb_penalties = []
     objectives = []
     deliveries = []
     logger.info("parsing %s for testing data", instance)
@@ -67,20 +68,18 @@ def evaluate_aoyu(policy, instance: str, pad: bool=False):
     policy.eval()
     for i,env in enumerate(test_envs):
         try:
-            max_step = env.nb_requests * 2 + env.nb_vehicles
-            if pad:
-                env.pad_env(policy.nb_vehicles, policy.nb_requests)
             with torch.no_grad():
                 logger.info("evaluating instance %s", i)
                 cost, penalty, delivered = evaluate_model(policy, env, i=i ,log=False)
             costs.append(cost)
-            penalties.append(penalty)
+            penalties.append(penalty["sum"])
+            nb_penalties.append(penalty["nb_penalty"])
             deliveries.append(delivered)
             objectives.append(env.objective)
         except:
             logger.info("PROBLEM OCCURED DURING EVALUATING INSTANCE %s", i)
         
-    df = pd.DataFrame({"cost": costs, "penalty": penalties, "objective": objectives, "delivered": deliveries})
+    df = pd.DataFrame({"cost": costs, "penalty": penalties, "nb_penalties": nb_penalties ,"objective": objectives, "delivered": deliveries})
     df["gap"] = (df["cost"] / df["objective"] - 1) * 100
     mean_gap = df["gap"].mean()
     mean_penalty = df["penalty"].mean()
@@ -97,9 +96,9 @@ if __name__ == "__main__":
     FILE_NAME = 'data/cordeau/a2-16.txt'
     test_env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=34, dataset=FILE_NAME)
 
-    policy = model.Aoyu(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
+    policy = model.Policy(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
     # loading a Result object, containing a state_dict of a trained model (WARNING: for now model hyperparameters are not stored in the result object) 
-    PATH = "models/result-a2-16-supervised-rf-01-aoyu256"
+    PATH = "models/result-a2-16-supervised-rf-06-aoy4layer"
     r = load_data(PATH)
     state = r.policy_dict
     policy.load_state_dict(state)
@@ -118,19 +117,19 @@ if __name__ == "__main__":
     instance = "a2-16"
     test_path = f"data/aoyu/{instance}-test.txt"
 
-    policy = model.Aoyu(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
-    # loading a Result object, containing a state_dict of a trained model (WARNING: for now model hyperparameters are not stored in the result object) 
-    PATH = "models/result-a2-16-supervised-rf-01-aoyu256"
-    r = load_data(PATH)
-    state = r.policy_dict
-    policy.load_state_dict(state)
+    # policy = model.Aoyu(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
+    # # loading a Result object, containing a state_dict of a trained model (WARNING: for now model hyperparameters are not stored in the result object) 
+    # PATH = "models/result-a2-16-supervised-rf-01-aoyu256"
+    # r = load_data(PATH)
+    # state = r.policy_dict
+    # policy.load_state_dict(state)
 
-    # passing the model to CUDA if available 
-    device = get_device()
-    policy.to(device)
-    policy.eval()
+    # # passing the model to CUDA if available 
+    # device = get_device()
+    # policy.to(device)
+    # policy.eval()
 
     df = evaluate_aoyu(policy, test_path)
-    df.to_csv(f"evaluations/data-{instance}-test-model-rf-a2-16-02")
+    df.to_csv(f"evaluations/data-{instance}-test-model-rf-a2-16-05")
 
 
