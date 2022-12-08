@@ -22,7 +22,6 @@ import gc
 import psutil
 
 
-#TODO: copy aoyu policy
 class Policy(nn.Module):
     def __init__(self, d_model: int=512, nhead: int=8, nb_requests: int=16, nb_vehicles: int=2, num_layers: int=2, time_end: int=1440, env_size: int=10):
         super(Policy, self).__init__()

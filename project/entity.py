@@ -15,7 +15,8 @@ class Request():
                 service_time: int,
                 start_window: np.ndarray,
                 end_window: Optional[np.ndarray],
-                max_ride_time: int):
+                max_ride_time: int,
+                load: int=1):
         self.id = id 
         self.pickup_position = pickup_position
         self.dropoff_position = dropoff_position
@@ -25,6 +26,7 @@ class Request():
         self.original_start_window = start_window # original windows will be tightened, for evaluation we still want to use these
         self.original_end_window = end_window
         self.max_ride_time = max_ride_time
+        self.load = load
         self.state = "pickup"
         self.statedict = {"pickup": 0, "in_trunk": 1, "delivered": 2}
         self.pickup_time: float = 1440
@@ -77,7 +79,7 @@ class Request():
             #earliest i can deliver
             self.end_window[1] = min(self.start_window[1] + self.service_time + self.max_ride_time, time_end)
         
-        logger.debug("setting new window for: start: %s -> %s, end: %s -> %s, for %s", self.original_start_window, self.start_window, self.original_end_window, self.end_window, self)
+        #logger.debug("setting new window for: start: %s -> %s, end: %s -> %s, for %s", self.original_start_window, self.start_window, self.original_end_window, self.end_window, self)
 
     def relax_window(self, time_end: int):
         """drop all window constrains"""
@@ -89,7 +91,7 @@ class Request():
         self.start_window[0] = 0
         #latest i can pickup (in order to arrive until end_window[1])
         self.start_window[1] = time_end
-        logger.debug("setting new window for: start: %s, end: %s, for %s", self.start_window, self.end_window, self)
+        #logger.debug("setting new window for: start: %s, end: %s, for %s", self.start_window, self.end_window, self)
 
     def get_vector(self) -> List[int]:
         """returns the vector representation of the Request"""
@@ -152,8 +154,11 @@ class Vehicle():
         self.position = new_position
         logger.debug("%s moved to position %s", self, self.position)
 
+    def get_trunk_load(self) -> float:
+        return sum([r.load for r in self.trunk])
+
     def can_pickup(self, request: Request) -> bool:
-        return len(self.trunk) < self.capacity and request.state == "pickup"
+        return self.get_trunk_load() < self.capacity and request.state == "pickup"
 
     def pickup_request(self, request: Request, current_time: float):
         """given a time stamp and a request the Vehicle tries to load the request into its trunk"""
@@ -215,6 +220,7 @@ class Result():
         self.d_model = None
         self.layers = None
         self.df = None
+        self.instance = None
         self.routes = 0
         self.penalty = 0
 

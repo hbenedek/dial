@@ -38,7 +38,6 @@ def seed_everything(seed=42):
 def plot_env(env):    
     #fig, ax = plt.subplots(1, 1, figsize=(10,10))
     x = np.stack([r.pickup_position for r in env.requests])
-    print(x)
     y = np.stack([r.dropoff_position for r in env.requests])
 
     fig, ax = plt.subplots(1, 2, figsize=(20, 10))
@@ -66,5 +65,66 @@ def plot_env(env):
     plt.show()
 
 if __name__ == "__main__":
-    pass
+    import seaborn as sns
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    from generator import load_data
+
+    df1 = pd.read_csv("evaluations/new-data-a2-16-test-model-nn-a2-16")
+    df1["model"] = "nn-a2-16"
+    df2 = pd.read_csv("evaluations/new-data-a2-16-test-model-rf-a2-16")
+    df2["model"] = "rf-a2-16"
+    df3 = pd.read_csv("evaluations/new-data-a2-16-test-model-rf-a4-48")
+    df3["model"] = "rf-a4-48"
+    df = pd.concat([df1, df2, df3]).drop("Unnamed: 0", axis=1)
+    fig, ax = plt.subplots(1,2, figsize=(12,4))
+    fig.suptitle("data: a2-16")
+    
+    ax[0].set(title="gap distribution", xlabel="gap", ylabel="counts")
+
+    sns.histplot(data=df, x="gap", hue="model", ax=ax[0], fill=True, alpha=0.5, element="step")
+    #labels = ax[0].get_yticks().tolist()
+    #labels = [float(label) * 10000 for label in labels]
+    #ax[0].set_yticklabels(labels)
+
+    ax[1].set(title="penalty distribution", xlabel="penalty", ylabel="counts")
+    sns.histplot(data=df, x="penalty", hue="model", ax=ax[1], fill=True, alpha=0.5, element="step")
+
+    #labels = ax[1].get_yticks().tolist()
+    #labels = [round(float(label) * 10000 * 23,2) for label in labels]
+    #ax[1].set_yticklabels(labels)
+
+    print(df.groupby("model").mean())
+
+    # PATH = "models/result-a2-16-supervised-rf-05-aoy4layer"
+    # r1 = load_data(PATH)
+    # PATH = "models/result-a2-16-supervised-rf-06-aoy4layer"
+    # r11 = load_data(PATH)
+
+    # PATH = "models/result-a2-16-supervised-nn-06-aoy4layer"
+    # r2 = load_data(PATH)
+
+    # PATH = "models/result-a4-48-supervised-rf-06-aoy4layer"
+    # r3 = load_data(PATH)
+    
+    # fig, ax = plt.subplots(1,2, figsize=(12,4))
+    # fig.suptitle("Supervised policy stealing on 10.000 a2-16 instance")
+    # epoch = [str(i) for i in range(1,21)]
+    # ax[0].set(title="train loss", xlabel="epoch", ylabel="cross entropy")
+    # ax[0].plot(epoch, r2.train_loss, label="nn-a2-16")
+    # ax[0].plot(epoch, r1.train_loss + r11.train_loss, label="rf-a2-16")
+    # ax[0].plot(epoch[:10], r3.train_loss, label="rf-a4-48")
+    # for label in ax[0].xaxis.get_ticklabels()[::2]:
+    #     label.set_visible(False)
+    # ax[1].set(title="test accuracy", xlabel="epoch", ylabel="accuracy")
+    # ax[1].plot(epoch, r2.accuracy, label="nn-a2-16")
+    # ax[1].plot(epoch, r1.accuracy + r11.accuracy, label="rf-a2-16")
+    # ax[1].plot(epoch[:10], r3.accuracy, label="rf-a4-48")
+    # for label in ax[1].xaxis.get_ticklabels()[::2]:
+    #     label.set_visible(False)
+
+    # plt.legend()
+    # plt.savefig("train.png")
+
+
 

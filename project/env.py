@@ -1,3 +1,4 @@
+from itertools import permutations
 from logging import Logger
 from typing import Optional, Tuple, List, Dict
 import numpy as np
@@ -24,7 +25,7 @@ class DarpEnv(gym.Env):
                 dataset: Optional[str]=None,
                 window: Optional[bool]=None):
         super(DarpEnv, self).__init__()
-        logger.debug("initializing env")
+        #logger.debug("initializing env")
         self.size = size
         self.max_step = nb_requests * 2 + nb_vehicles
         self.nb_requests = nb_requests
@@ -36,6 +37,7 @@ class DarpEnv(gym.Env):
         self.current_episode = 0
         self.penalty = 0
         self.window = window
+        self.original_nb_requests = nb_requests
 
         if max_route_duration:
             self.max_route_duration = max_route_duration
@@ -54,7 +56,7 @@ class DarpEnv(gym.Env):
 
     def reset(self, relax_window: bool=False, entities=None):
         """restarts/initializes the environment"""
-        logger.debug("populate env instance with %s Vehicle and %s Request objects", self.nb_vehicles, self.nb_requests)
+        #logger.debug("populate env instance with %s Vehicle and %s Request objects", self.nb_vehicles, self.nb_requests)
         #FIXME: this could be unified somehow
         # populate instance with saved entities (used with generator.py: parse_aoyu(), model.py: reinforce())
         if entities:
@@ -73,13 +75,13 @@ class DarpEnv(gym.Env):
             for request in requests:
                 request.relax_window(self.time_end)
         else:
-            logger.debug("tightening window constraints for all Requests")
+            #logger.debug("tightening window constraints for all Requests")
             for request in requests:
                 request.tight_window(self.time_end, self.nb_requests)
         self.depots = self.start_depot, self.end_depot
         self.waiting_vehicles = [vehicle.id for vehicle in self.vehicles]
         self.current_vehicle = self.waiting_vehicles.pop()
-        logger.debug("new current vehicle selected: %s", self.current_vehicle)
+        #logger.debug("new current vehicle selected: %s", self.current_vehicle)
         
         self.coordinates_dict = self.coodinates_to_requests()
         # initially all actions are available, last action is only avaailable if trunk is empty (see mask_illegal())
@@ -121,6 +123,7 @@ class DarpEnv(gym.Env):
         current_vehicle = self.vehicles[self.current_vehicle]
         #vehicle aims at end depot
         if action == self.nb_requests:
+            logger.debug("%s heading towards end depot", self.current_vehicle)
             current_vehicle.destination = self.end_depot
             current_vehicle.to_be_finished = 1
         #vehicle aims at Request, depending on trunk it decides to pickup or dropoff
@@ -144,7 +147,7 @@ class DarpEnv(gym.Env):
                     event = 1
                 events[vehicle] = self.current_time + event
             elif vehicle.state is "frozen":
-                events[vehicle] =vehicle.frozen_until
+                events[vehicle] = vehicle.frozen_until
         events = {v: e for v,e in events.items() if e >= self.current_time}
         next_vehicle = min(events, key=events.get)
         new_time = events[next_vehicle]
@@ -212,7 +215,7 @@ class DarpEnv(gym.Env):
             mask[-1] = 1
         for r in current_vehicle.trunk:
             mask[r.id] = 1
-        if len(current_vehicle.trunk) >= current_vehicle.capacity:
+        if current_vehicle.get_trunk_load() >= current_vehicle.capacity:
             return torch.tensor(mask)
         #if trunk is empty, end depot is available 
         #if one vehicle left, it shoud deliver all remaining requests
@@ -255,7 +258,7 @@ class DarpEnv(gym.Env):
             logger.debug("DONE")
         # check if all Requests are delivered, if not change reward
         if done and not self.is_all_delivered():
-            logger.debug("ERROR: VCEHICLES RETURNED TO DEPOT BUT REQUESTS ARE NOT DELIVERED, ABORT EPISODE")
+            logger.info("ERROR: VCEHICLES RETURNED TO DEPOT BUT REQUESTS ARE NOT DELIVERED, ABORT EPISODE")
             reward = reward + 1000
             
             for vehicle in self.vehicles:
@@ -297,7 +300,7 @@ class DarpEnv(gym.Env):
         max_route_duration = [round(v.calculate_max_route_duration_penalty(), 2) for v in self.vehicles]
 
         merged = start + end + max_ride_time + max_route_duration
-        nb_penalty = sum(v > 0 for term in merged for v in term)
+        nb_penalty = sum(term > 0 for term in merged)
         self.penalty = {"start_window": start, 
                         "end_window": end,
                         "max_route_duration": max_route_duration,
@@ -360,12 +363,13 @@ class DarpEnv(gym.Env):
         vehicle_diff = nb_vehicles - self.nb_vehicles
         for _ in range(vehicle_diff):
             dummy_vehicle = Vehicle(nb_vehicles, np.array([0.0,0.0]), 0, 0)
-            dummy_vehicle .state = "finished"
+            dummy_vehicle.state = "finished"
+            dummy_vehicle.to_be_finished = 1
             self.vehicles.append(dummy_vehicle)
             self.nb_vehicles += 1
 
         for _ in range(request_diff):
-            dummy_request = Request(nb_requests, np.array([0.0,0.0]), np.array([0.0,0.0]), 0, np.array([0.0,0.0]), np.array([0.0,0.0]), 0)
+            dummy_request = Request(self.nb_requests, np.array([0.0,0.0]), np.array([0.0,0.0]), 0, np.array([0.0,0.0]), np.array([0.0,0.0]), 0)
             dummy_request.pickup_time = 0
             dummy_request.dropoff_time = 0
             dummy_request.state = "delivered"
@@ -375,6 +379,9 @@ class DarpEnv(gym.Env):
         #self.max_step = 2 * self.nb_requests + self.nb_vehicles
         logger.debug("env padded to %s Vehicles and %s Requests", self.nb_vehicles, self.nb_requests)
 
+    def augment(self, permutation: np.ndarray):
+        self.requests = [self.requests[i] for i in permutation]
+        self.available_actions = self.available_actions[permutation]
 
 
 if __name__ == "__main__":
@@ -387,8 +394,8 @@ if __name__ == "__main__":
     FILE_NAME = 'data/cordeau/a2-16.txt'
     env = DarpEnv(size=10, nb_requests=16, nb_vehicles=2, time_end=1440, max_step=1000, dataset=FILE_NAME)
     obs = env.representation()
-
-    # simulate env with nearest neighbor action
+    
+    #simulate env with nearest neighbor action
     rewards = []
     for t in range(100):
         action = env.nearest_action_choice()    

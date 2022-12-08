@@ -25,7 +25,7 @@ def copycat_trainer(policy: Policy,
     (for the moment the nearest neighbour policy)
     """
     criterion = nn.CrossEntropyLoss()
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=50, factor=0.99)
+    #scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=50, factor=0.99)
 
     running_loss = 0
     train_losses = []
@@ -49,9 +49,6 @@ def copycat_trainer(policy: Policy,
 
             loss.backward()
             optimizer.step()
-
-            running_loss += loss.item()
-            scheduler.step(running_loss)
 
             total += supervised_actions.size(0)
             model_actions = torch.max(outputs, 1).indices
@@ -93,33 +90,52 @@ def copycat_trainer(policy: Policy,
     result.policy_dict = state_dict
     return result
 
-def extract_state_action_pairs(envs, act, batch_size):
+def extract_state_action_pairs(envs, act, batch_size, augment=[]):
     dataset = []
     for env in envs:
-        obs = env.representation()
-        for _ in range(2 * env.nb_requests + env.nb_vehicles):
-            action = act(env)
-            dataset.append([obs, action])
-            obs, _, done = env.step(action)
-            if done:
-                break
+        try:
+            nb_requests, nb_vehicles = env.nb_requests, env.nb_vehicles
+            if augment:
+                print("ddddd")
+                nb_vehicles_augmented, nb_requests_augmented = augment
+                logger.debug("padding env")
+                env.pad_env(nb_vehicles_augmented, nb_requests_augmented) 
+                logger.debug("augmenting env")
+                # shuffle Request actions, leave return to end depot action as last 
+                permutation = np.random.permutation(nb_requests_augmented) #np.arange(nb_requests_augmented)  
+                env.augment(permutation) #TODO: somehow not working
+                permutation = list(np.append(permutation, nb_requests_augmented))
+            obs = env.representation()
+            for _ in range(2 * nb_requests + nb_vehicles):
+                action = act(env)
+                if augment:
+                    action = permutation.index(action)
+                dataset.append([obs, action])
+                obs, _, done = env.step(action)
+                if done:
+                    break
+        except:
+            logger.info("PROBLEM OCCURED DURING EXTRACTING STATE ACTION PARIS")
+            logger.info(permutation)
     logger.info("Supervised dataset generetad of size %s", len(dataset))
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     return loader
 
 
-def generate_supervised_dataset(train_envs, test_envs, supervised_policy: str, batch_size: int):
+def generate_supervised_dataset(train_envs, test_envs, supervised_policy: str, batch_size: int, augment=[]):
     if supervised_policy == "nn":
         def act(env): 
             return env.nearest_action_choice()
     if supervised_policy == "rf":
         def act(env): 
             action = env.vehicles[env.current_vehicle].routes.popleft() - 1 
-            if action >= env.nb_requests:
-                action = action - env.nb_requests
+            if action == env.original_nb_requests * 2:
+                return env.nb_requests
+            if action >= env.original_nb_requests:
+                action = action - env.original_nb_requests
             return action
-    train_loader = extract_state_action_pairs(train_envs, act, batch_size)
-    test_loader = extract_state_action_pairs(test_envs, act, batch_size)
+    train_loader = extract_state_action_pairs(train_envs, act, batch_size, augment)
+    test_loader = extract_state_action_pairs(test_envs, act, batch_size, augment)
     return train_loader, test_loader
 
 
@@ -132,6 +148,7 @@ def supervised_trainer(
                     nb_epochs: int,
                     policy: Policy,
                     optimizer:torch.optim.Optimizer,
+                    augment: List[int]=[],
                     env_path: str="data/test_sets/generated-10000-a2-16.pkl") -> Result:
 
     if instance:
@@ -143,14 +160,13 @@ def supervised_trainer(
 
     logger.info("training id: %s", id)
 
-    train_loader, test_loader = generate_supervised_dataset(train_envs, test_envs, supervised_policy, batch_size)
+    train_loader, test_loader = generate_supervised_dataset(train_envs, test_envs, supervised_policy, batch_size, augment)
     logger.info("train and test DataLoader objects successfully initialized")
 
     logger.info("training starts")
     result = copycat_trainer(policy=policy, optimizer=optimizer, nb_epochs=nb_epochs, train_loader=train_loader, test_loader=test_loader, id=id)
-
+    result.instance = instance
     logger.info("saving Result object...")
-    torch.save(policy.state_dict(), result_path + '/' + id + "-model")
     dump_data(result, result_path + '/' + id)
     logger.info("saving done")
     return result
@@ -159,68 +175,43 @@ def supervised_trainer(
 if __name__ == "__main__":
 
     ################################    EXAMPLE USAGE 1 (SUPERVISED TRAINING)   #######################################
-
-    instance="a2-16"
-    result_path = "models"
-    supervised_policy="nn"
-    trial = "06"
+    import re
+    import glob
+    result_path = "models/"
     batch_size = 256
-    nb_epochs = 20
-    id = f"result-{instance}-supervised-{supervised_policy}-{trial}-aoy4layer"
-
-    #initialize policy
-    policy = Policy(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
-    device = get_device()
-    policy = policy.to(device)
-    logger.info("training on device: %s", device)
-
-    #initialize optimizer
-    optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
-
-    #start train
-    result = supervised_trainer(id, 
-                            instance,
-                            result_path,
-                            supervised_policy,
-                            batch_size, 
-                            nb_epochs, 
-                            policy,
-                            optimizer) 
-
-
-    test_path = f"data/aoyu/{instance}-test.txt"
-    df = evaluate_aoyu(policy, test_path)
-    df.to_csv(f"evaluations/new-data-{instance}-test-model-nn-a2-16")
-
-    ###
-
-    instance="a4-48"
+    nb_epochs = 5
     supervised_policy="rf"
-    id = f"result-{instance}-supervised-{supervised_policy}-{trial}-aoy4layer"
 
+    #logger = set_level(logger, "debug")
     #initialize policy
     policy = Policy(d_model=256, nhead=8, nb_requests=48, nb_vehicles=4, num_layers=8, time_end=1440, env_size=10)
-    device = get_device()
-    policy = policy.to(device)
-    logger.info("training on device: %s", device)
+    path = "models/new-result-a4-48-supervised-rf"
+    r = load_data(path)
+    state = r.policy_dict
+    policy.load_state_dict(state)
 
-    #initialize optimizer
+    # #initialize optimizer
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
-
+    #id = "result-02-16-supervised-rf-50-epoch"
+    files = glob.glob("data/aoyu/[ab]*")
+    instances = [re.search("data/aoyu/(.*-.*)-.*", file).group(1) for file in files]
     #start train
-    result = supervised_trainer(id, 
-                            instance,
-                            result_path,
-                            supervised_policy,
-                            batch_size, 
-                            nb_epochs, 
-                            policy,
-                            optimizer) 
+    for i, instance in enumerate(instances):
+        id = f"augmented-{instance}"
+        device = get_device()
+        policy = policy.to(device)
+        logger.info("training on device: %s", device)
+        result = supervised_trainer(id, 
+                                instance,
+                                result_path,
+                                supervised_policy,
+                                batch_size, 
+                                nb_epochs, 
+                                policy,
+                                optimizer,
+                                augment=[4, 48]) 
 
-    instance="a2-16"
-    test_path = f"data/aoyu/{instance}-test.txt"
-    df = evaluate_aoyu(policy, test_path)
-    df.to_csv(f"evaluations/new-data-{instance}-test-model-rf-a4-48")
+    
 
     
 
