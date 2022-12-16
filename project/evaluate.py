@@ -25,8 +25,8 @@ def simulate(env: DarpEnv, policy, greedy: bool=False) -> Tuple[List[float], Lis
         for vehicle_id in indices:
             state = [torch.tensor(world).unsqueeze(0), torch.tensor(requests).unsqueeze(0), torch.tensor(vehicle).unsqueeze(0)]
             mask = env.mask_illegal(vehicle_id)
-            action, log_prob = policy.act(state, mask, greedy=greedy)
-            #action = env.nearest_action_choice(vehicle_id)
+            #action, log_prob = policy.act(state, mask, greedy=greedy)
+            action = env.nearest_action_choice(vehicle_id)
             state, reward, done = env.step(action, vehicle_id)
             rewards.append(reward)
             log_prob = 0
@@ -124,17 +124,17 @@ if __name__ == "__main__":
 
     # loading the darp instance
 
-    policy = model.Policy(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
+    policy =0# model.Policy(d_model=256, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=4, time_end=1440, env_size=10)
     # loading a Result object, containing a state_dict of a trained model (WARNING: for now model hyperparameters are not stored in the result object) 
-    PATH = "models/new-resulta2-16-supervised-rf"
-    r = load_data(PATH)
-    state = r.policy_dict
-    policy.load_state_dict(state)
+    #PATH = "models/new-resulta2-16-supervised-rf"
+    #r = load_data(PATH)
+    #state = r.policy_dict
+    #policy.load_state_dict(state)
 
     # passing the model to CUDA if available 
-    device = get_device()
-    policy.to(device)
-    policy.eval()
+    #device = get_device()
+    #policy.to(device)
+    #policy.eval()
 
     files = glob.glob("data/aoyu/[ab]*")
     instances = set([re.search("data/aoyu/(.*-.*)-.*", file).group(1) for file in files])

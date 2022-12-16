@@ -145,8 +145,6 @@ class DarpEnv(gym.Env):
         vehicle = self.vehicles[vehicle_id]
         #if there are still available Vehicles choose new current vehicle
         if vehicle.history:
-            #for v in self.vehicles:
-            #    print(v.id, "history", v.history)
             target_request = self.requests[vehicle.history[-1]]
             if target_request in vehicle.trunk:
                 target_request.pickup_time = self.current_time
@@ -194,7 +192,7 @@ class DarpEnv(gym.Env):
                 vehicle.free_time += ride_time
             else:
                 vehicle.free_time = window_start
-            vehicle.history.append(action)
+            vehicle.history.append(target_request.id)
             vehicle.schedule.append(vehicle.free_time)
         
 
