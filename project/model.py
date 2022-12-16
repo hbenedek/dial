@@ -134,7 +134,10 @@ def reinforce(policy: Policy,
              update_baseline: int,
              test_env: DarpEnv):
 
-    env = DarpEnv(10, nb_requests, nb_vehicles, time_end=1440, max_step=nb_requests * 2 + nb_vehicles, max_route_duration=480, capacity=3, max_ride_time=30, dataset=PATH)         
+    env = DarpEnv(10, nb_requests, nb_vehicles, time_end=1440, max_route_duration=480, capacity=3, max_ride_time=30, dataset=PATH)   
+    #padding env to be able to use larger policy networks
+
+     
     #init baseline model
     baseline = copy.deepcopy(policy)
     baseline = baseline.to(device)
@@ -159,6 +162,7 @@ def reinforce(policy: Policy,
                 baseline_losses.clear()
 
         env.reset()
+        env.pad_env(policy.nb_vehicles, policy.nb_requests) 
         entities = env.vehicles, env.requests, env.depots
         #simulate episode with train and baseline policy
         with torch.no_grad():
@@ -228,7 +232,6 @@ def reinforce_trainer(test_env_path: str,
                         nb_requests, 
                         nb_vehicles, 
                         time_end=1440, 
-                        max_step=nb_requests * 2 + nb_vehicles, 
                         dataset=test_env_path)
     logger.info("dataset successfully loaded")
 
@@ -241,26 +244,26 @@ def reinforce_trainer(test_env_path: str,
 if __name__ == "__main__":
     seed_everything(1)
     result_path = "models"
+    variant = "a"
     nb_vehicles = 2
     nb_requests = 16
-    trial = "03"
-    variant = "a"
     instance = f"{variant}{nb_vehicles}-{nb_requests}"
     test_env_path = f'data/cordeau/{instance}.txt'  
     PATH = test_env_path
-    id = f"result-{instance}-reinforce-{trial}-aoyu"
+    id = f"reinforce-random"
 
-    nb_episodes= 2000
-    update_baseline = 20
+    nb_episodes= 1000
+    update_baseline = 100
 
-    policy = Policy(d_model=256, nhead=8, nb_requests=nb_requests, nb_vehicles=nb_vehicles, num_layers=4, time_end=1440, env_size=10)
-    device = get_device()
-    model_path = "models/result-a2-16-supervised-nn-01-aoyu256"
+    policy = Policy(d_model=256, nhead=8, nb_requests=48, nb_vehicles=4, num_layers=8, time_end=1440, env_size=10)
+    model_path = "models/aug/augmented-a3-24-final"
     r = load_data(model_path)
     state = r.policy_dict
     policy.load_state_dict(state)
-    logger.info("training on device: %s", device)
+
+    device = get_device()
     policy = policy.to(device)
+    logger.info("training on device: %s", device)
 
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4, weight_decay=1e-3)
 

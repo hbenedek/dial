@@ -3,6 +3,7 @@ from logging import Logger
 from typing import Optional, Tuple, List, Dict
 import numpy as np
 import gym
+from requests import request
 import torch
 from utils import coord2int, float_equality, distance
 from log import logger, set_level
@@ -17,7 +18,6 @@ class DarpEnv(gym.Env):
                 nb_requests: int,
                 nb_vehicles: int,
                 time_end: int,
-                max_step: int,
                 max_route_duration: Optional[int]=None,
                 capacity: Optional[int]=None,
                 max_ride_time: Optional[int]=None,
@@ -117,98 +117,8 @@ class DarpEnv(gym.Env):
                                                                                         self.window)
 
 
-
-    def take_action(self, action: int):
-        """the action is an id of a request or end depot"""
-        current_vehicle = self.vehicles[self.current_vehicle]
-        #vehicle aims at end depot
-        if action == self.nb_requests:
-            logger.debug("%s heading towards end depot", self.current_vehicle)
-            current_vehicle.destination = self.end_depot
-            current_vehicle.to_be_finished = 1
-        #vehicle aims at Request, depending on trunk it decides to pickup or dropoff
-        else:
-            target_request = self.requests[action]
-            current_vehicle.destination = current_vehicle.set_destination(target_request)
-            self.available_actions[action] = 0
-        logger.debug("choosing action %s (destination=%s) for %s", action, current_vehicle.destination, current_vehicle)
-        current_vehicle.history.append(action)
-        current_vehicle.set_state("busy")
-
-    def update_time_step(self, epsilon=0.1) -> Tuple[Vehicle, Dict[Vehicle, float]]:
-        "For each vehicle queries the next decision time and sets the current time attribute to the minimum of these values"
-        logger.debug("Updating time step...")
-        events = dict()
-        for vehicle in self.vehicles:
-            if vehicle.state is "busy":
-                event = vehicle.get_distance_to_destination() 
-                # if vehicle choose to not move we still increase the time one
-                if float_equality(event, 0):
-                    event = 1
-                events[vehicle] = self.current_time + event
-            elif vehicle.state is "frozen":
-                events[vehicle] = vehicle.frozen_until
-        events = {v: e for v,e in events.items() if e >= self.current_time}
-        next_vehicle = min(events, key=events.get)
-        new_time = events[next_vehicle]
-        self.last_time_gap = new_time - self.current_time
-        self.previous_time = self.current_time
-        self.current_time = new_time
-        logger.debug("Time step updated to %s", self.current_time)
-
-        #unfreeze vehicles
-        for vehicle in self.vehicles:
-            if vehicle.state is "frozen" and self.current_time > vehicle.frozen_until:
-                vehicle.set_state("waiting")
-
-        return next_vehicle, events
-
-    def update_vehicle_position(self, vehicle: Vehicle, events: Dict[Vehicle, float]):
-        """
-        update just the vehicle which the last event corresponds to
-        """
-        logger.debug("Updating vehicle position...")
-        self.update_needed = False
-         
-        if vehicle.state is "busy":
-            vehicle.move(vehicle.destination) 
-
-        request = self.coordinates_dict.get(tuple(vehicle.destination)) #if destination is end depot dict returns None
-        if request:
-            if distance(request.pickup_position, vehicle.position) < 0.01:
-                if self.current_time >= request.start_window[0]:
-                    vehicle.pickup_request(request, self.current_time)
-                    vehicle.set_state("waiting")
-                elif vehicle.state is "busy":
-                    vehicle.set_state("frozen")
-                    vehicle.frozen_until = request.start_window[0]
-            
-            elif distance(request.dropoff_position, vehicle.position) < 0.01:
-                if self.current_time >= request.end_window[0] + request.service_time:
-                    vehicle.dropoff_request(request, self.current_time)
-                    vehicle.set_state("waiting")
-                elif vehicle.state is "busy":
-                    vehicle.set_state("frozen")
-                    vehicle.frozen_until = request.end_window[0] + request.service_time
-        
-        elif distance(self.end_depot, vehicle.position) < 0.01:
-            vehicle.set_state("finished")
-            self.update_needed = True
-
-        # check if multiple min values
-        #next_vehicle = min(events, key=events.get)
-        #if len([e for e in events.values() if e == events[next_vehicle]]) > 1:
-        #    self.update_needed = True
-
-        if all([vehicle.state is "finished" for vehicle in self.vehicles]):
-            self.update_needed = False
-        elif all([vehicle.state in ["busy", "frozen", "finished"] for vehicle in self.vehicles]):
-            if not self.current_time == self.time_end:
-                self.update_needed = True
-                   
-
-    def mask_illegal(self) -> torch.tensor:  
-        current_vehicle = self.vehicles[self.current_vehicle]
+    def mask_illegal(self, vehicle_id) -> torch.tensor:  
+        current_vehicle = self.vehicles[vehicle_id]
         mask = np.zeros(self.nb_requests + 1)
         #if request in trunk that action should be available
         if len(current_vehicle.trunk) == 0:
@@ -223,33 +133,70 @@ class DarpEnv(gym.Env):
             mask[-1] = 0
         return torch.tensor(mask + self.available_actions)
 
-    def step(self, action: int):
+    def step(self, action: int, vehicle_id: int):
         """
         moves the environment to its new state
         this involves possible new time step, vehicle position update,
         resolving pickups, dropoffs, assigning new destinations to vehicles
         """
         logger.debug("***START ENV STEP %s***", self.current_step)
-        self.take_action(action)
         self.current_step += 1
 
+        vehicle = self.vehicles[vehicle_id]
         #if there are still available Vehicles choose new current vehicle
-        next_player = self.waiting_vehicles.pop() if self.waiting_vehicles else self.nb_vehicles
-        if next_player == self.nb_vehicles:
-            self.update_needed = True #if a Vehicle arrives at end depot we need to perform one more update
-            while self.update_needed:
-                vehicle, events = self.update_time_step()
-                self.update_vehicle_position(vehicle, events)
-
-            logger.debug("querying waiting vehicles for new destination assignment")
-            for vehicle in self.vehicles:
-                if vehicle.state == 'waiting':
-                    self.waiting_vehicles.append(vehicle.id)
-                    logger.debug("%s added to waiting_vehicles list", self.vehicles[vehicle.id])
-            next_player = self.waiting_vehicles.pop() if self.waiting_vehicles else self.nb_vehicles
+        if vehicle.history:
+            #for v in self.vehicles:
+            #    print(v.id, "history", v.history)
+            target_request = self.requests[vehicle.history[-1]]
+            if target_request in vehicle.trunk:
+                target_request.pickup_time = self.current_time
+            else:
+                target_request.dropoff_time = self.current_time
+            vehicle.service_time = target_request.service_time
         
-        self.current_vehicle = next_player
-        logger.debug("new current vehicle selected: %s", self.current_vehicle)
+        if action == self.nb_requests:
+            logger.debug("%s heading towards end depot", vehicle)
+            travel_time = distance(vehicle.position, self.end_depot)
+            vehicle.total_distance_travelled += travel_time
+            vehicle.position = self.end_depot
+            vehicle.free_time = self.time_end
+            vehicle.to_be_finished = 1
+            vehicle.history.append(action)
+            vehicle.schedule.append(vehicle.free_time)
+            vehicle.set_state("finished")
+        else:
+            target_request = self.requests[action]
+            self.available_actions[action] = 0
+            #print("avilable", self.available_actions)
+            logger.debug("choosing action %s (destination=%s) for %s", action, vehicle.destination, vehicle)
+
+            #perform dropoff
+            if target_request in vehicle.trunk:
+                travel_time = distance(vehicle.position, target_request.dropoff_position)
+                vehicle.total_distance_travelled += travel_time
+                window_start = target_request.end_window[0]
+                vehicle.position = target_request.dropoff_position
+                vehicle.dropoff_request(target_request, self.current_time)
+
+               
+            #perform pickup
+            else:
+                travel_time = distance(vehicle.position, target_request.pickup_position)
+                vehicle.total_distance_travelled += travel_time
+                window_start = target_request.start_window[0]
+                vehicle.position = target_request.pickup_position
+                vehicle.pickup_request(target_request, self.current_time)
+              
+
+
+            if vehicle.free_time + vehicle.service_time + travel_time > window_start + 1e-2:
+                ride_time = vehicle.service_time + travel_time
+                vehicle.free_time += ride_time
+            else:
+                vehicle.free_time = window_start
+            vehicle.history.append(action)
+            vehicle.schedule.append(vehicle.free_time)
+        
 
         reward = self.get_reward() 
 
@@ -299,22 +246,26 @@ class DarpEnv(gym.Env):
         max_ride_time = [round(r.calculate_ride_time_penalty(), 2) for r in self.requests] 
         max_route_duration = [round(v.calculate_max_route_duration_penalty(), 2) for v in self.vehicles]
 
-        merged = start + end + max_ride_time + max_route_duration
-        nb_penalty = sum(term > 0 for term in merged)
+        merged = start + end 
+        tw_penalty = sum(term > 0 for term in merged)
+        rt_penalty = sum(term > 0 for term in max_ride_time)
+        rd_penalty = sum(term > 0 for term in max_route_duration)
         self.penalty = {"start_window": start, 
                         "end_window": end,
                         "max_route_duration": max_route_duration,
                         "max_ride_time": max_ride_time,
-                        "nb_penalty": nb_penalty,
+                        "tw_penalty": tw_penalty,
+                        "rt_penalty": rt_penalty,
+                        "rd_penalty": rd_penalty,
                         "sum": sum(start + end + max_route_duration + max_ride_time)}
 
 
-    def nearest_action_choice(self):
+    def nearest_action_choice(self, vehicle_id):
         """
         Given the current environment configuration, returns the closest possible destination for the current vehicle
         among potential pickups and dropoffs
         """
-        vehicle = self.vehicles[self.current_vehicle]
+        vehicle = self.vehicles[vehicle_id]
         choice_id, choice_dist = None, np.inf #(request id, distance to target)
         for request in self.requests:
             #potential pickup
@@ -424,6 +375,7 @@ if __name__ == "__main__":
     logger.info("max_route_duration: %s", env.penalty["max_route_duration"])
     logger.info("max_ride_time: %s", env.penalty["max_ride_time"])
     logger.info("total penalty: %s", env.penalty["sum"])
+
 
 
     

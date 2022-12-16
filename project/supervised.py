@@ -96,7 +96,6 @@ def extract_state_action_pairs(envs, act, batch_size, augment=[]):
         try:
             nb_requests, nb_vehicles = env.nb_requests, env.nb_vehicles
             if augment:
-                print("ddddd")
                 nb_vehicles_augmented, nb_requests_augmented = augment
                 logger.debug("padding env")
                 env.pad_env(nb_vehicles_augmented, nb_requests_augmented) 
@@ -179,28 +178,29 @@ if __name__ == "__main__":
     import glob
     result_path = "models/"
     batch_size = 256
-    nb_epochs = 5
+    nb_epochs = 20
     supervised_policy="rf"
 
     #logger = set_level(logger, "debug")
     #initialize policy
-    policy = Policy(d_model=256, nhead=8, nb_requests=48, nb_vehicles=4, num_layers=8, time_end=1440, env_size=10)
-    path = "models/new-result-a4-48-supervised-rf"
-    r = load_data(path)
-    state = r.policy_dict
-    policy.load_state_dict(state)
+    policy = Policy(d_model=64, nhead=8, nb_requests=16, nb_vehicles=2, num_layers=8, time_end=1440, env_size=10)
+    #path = "models/new-result-a4-48-supervised-rf"
+    #r = load_data(path)
+    #state = r.policy_dict
+    #policy.load_state_dict(state)
 
     # #initialize optimizer
     optimizer = torch.optim.Adam(policy.parameters(), lr=1e-4)
     #id = "result-02-16-supervised-rf-50-epoch"
     files = glob.glob("data/aoyu/[ab]*")
-    instances = [re.search("data/aoyu/(.*-.*)-.*", file).group(1) for file in files]
+    instances = set([re.search("data/aoyu/(.*-.*)-.*", file).group(1) for file in files])
     #start train
+    instances=["a2-16"]
     for i, instance in enumerate(instances):
         id = f"augmented-{instance}"
         device = get_device()
         policy = policy.to(device)
-        logger.info("training on device: %s", device)
+        logger.info("ITERATION %s, training on device: %s", i, device)
         result = supervised_trainer(id, 
                                 instance,
                                 result_path,
@@ -208,8 +208,7 @@ if __name__ == "__main__":
                                 batch_size, 
                                 nb_epochs, 
                                 policy,
-                                optimizer,
-                                augment=[4, 48]) 
+                                optimizer)#,augment=[4, 48]) 
 
     
 

@@ -62,8 +62,7 @@ class Request():
 
     def tight_window(self, time_end: int, nb_requests: int):
         """make the time windows as tight as possible"""
-        #filter = lambda x: min(max(0, x), time_end)
-        delivery_time = int(self.get_min_delivery_time())
+        delivery_time = self.get_min_delivery_time()
         self.original_start_window = self.start_window.copy()
         self.original_end_window = self.end_window.copy()
         #outbound
@@ -137,6 +136,9 @@ class Vehicle():
         self.target_request: Optional[Request] = None
         self.destination = np.empty(2)
         self.routes = deque()
+        self.schedule = []
+        self.service_time =0
+        self.free_time = 0.0
 
     def __repr__(self):
         return f"Vehicle_{self.id}_status_{self.state}"
@@ -147,9 +149,10 @@ class Vehicle():
     def get_distance_to_destination(self) -> float:
         return distance(self.position, self.destination)
 
-    def move(self, new_position: np.ndarray):
+    def move(self, new_position: np.ndarray, current_time):
         """"set new position and save travelled distances"""
         distance_travelled = distance(self.position, new_position)
+        self.free_time = distance_travelled + current_time
         self.total_distance_travelled += distance_travelled
         self.position = new_position
         logger.debug("%s moved to position %s", self, self.position)
@@ -162,12 +165,11 @@ class Vehicle():
 
     def pickup_request(self, request: Request, current_time: float):
         """given a time stamp and a request the Vehicle tries to load the request into its trunk"""
-        if self.can_pickup(request):
-            self.trunk.append(request)
-            logger.debug("%s picked up by %s", request, self)
-            request.set_state("in_trunk")
-            request.being_served = self.id
-            request.pickup_time = current_time
+        self.trunk.append(request)
+        logger.debug("%s picked up by %s", request, self)
+        request.set_state("in_trunk")
+        request.being_served = self.id
+            #self.free_time += request.service_time
         #else:
         #    logger.debug("ERROR: %s pickup DENIED for %s", request, self)
 
@@ -176,17 +178,16 @@ class Vehicle():
 
     def dropoff_request(self, request: Request, current_time: float):
         """given a time stamp and a request the Vehicle tries to unload the request from its trunk"""
-        if self.can_dropoff(request):
-            self.trunk.remove(request)
-            logger.debug("%s dropped of by %s", request, self)
-            request.set_state("delivered")
-            request.dropoff_time = current_time - request.service_time
+        self.trunk.remove(request)
+        logger.debug("%s dropped of by %s", request, self)
+        request.set_state("delivered")
+            #self.free_time += request.service_time
         #else:
         #    logger.debug("ERROR: %s dropoff DENIED for %s", request, self)
 
     def set_state(self, state: str):
         """state of the Vehicle is either waiting, busy or finished"""
-        logger.debug("setting new state: %s -> %s", self, state)
+        logger.debug("setting new state: %s -> %s, until: %s", self, state, self.frozen_until)
         self.state = state
 
     def set_destination(self, request: Request) -> np.ndarray:
